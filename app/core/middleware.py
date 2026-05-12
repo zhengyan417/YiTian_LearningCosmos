@@ -11,10 +11,8 @@ from typing import (
 
 from asgi_correlation_id import correlation_id
 from fastapi import Request
-from jose import (
-    JWTError,
-    jwt,
-)
+import jwt
+from jwt.exceptions import InvalidTokenError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -115,7 +113,7 @@ class LoggingContextMiddleware(BaseHTTPMiddleware):
                         # This will be set by the dependency injection if the endpoint uses authentication
                         # We'll check after the request is processed
 
-                except JWTError:
+                except InvalidTokenError:
                     # Token is invalid, but don't fail the request - let the auth dependency handle it
                     pass
 

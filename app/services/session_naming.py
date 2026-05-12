@@ -22,7 +22,6 @@ from app.core.logging import logger
 from app.core.metrics import session_names_generated_total
 from app.core.prompts import SESSION_TITLE_PROMPT
 from app.models.session import Session as ChatSession
-from app.schemas.chat import SessionTitle
 from app.services.database import database_service
 from app.services.llm import llm_service
 
@@ -60,15 +59,16 @@ async def _persist_session_name(session_id: str, user_message: str) -> None:
                 SystemMessage(content=SESSION_TITLE_PROMPT),
                 HumanMessage(content=user_message[:500]),
             ],
-            model_name="gpt-5.4-nano",
-            response_format=SessionTitle,
-            reasoning={"effort": "low"},
+            model_name="deepseek-v4-flash",
+            # response_format=SessionTitle,
+            # reasoning={"effort": "low"},
             max_tokens=32,
             temperature=0.3,
         )
-        await database_service.update_session_name(session_id, result.title)
+        title = str(result.content)
+        await database_service.update_session_name(session_id, title)
         session_names_generated_total.labels(status="success").inc()
-        logger.info("session_name_generated", session_id=session_id, name=result.title)
+        logger.info("session_name_generated", session_id=session_id, name=title)
     except Exception:
         session_names_generated_total.labels(status="error").inc()
         logger.exception("session_name_generation_failed", session_id=session_id)

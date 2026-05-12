@@ -9,6 +9,10 @@ from app.core.logging import logger
 
 def langfuse_init():
     """Initialize Langfuse."""
+    if not settings.LANGFUSE_TRACING_ENABLED:
+        logger.debug("langfuse_tracing_disabled")
+        return
+
     langfuse = Langfuse(
         tracing_enabled=settings.LANGFUSE_TRACING_ENABLED,
         public_key=settings.LANGFUSE_PUBLIC_KEY,

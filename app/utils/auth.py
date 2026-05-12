@@ -8,10 +8,8 @@ from datetime import (
 )
 from typing import Optional
 
-from jose import (
-    JWTError,
-    jwt,
-)
+import jwt
+from jwt.exceptions import InvalidTokenError
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -80,6 +78,6 @@ def verify_token(token: str) -> Optional[str]:
         logger.info("token_verified", thread_id=thread_id)
         return thread_id
 
-    except JWTError as e:
+    except InvalidTokenError as e:
         logger.error("token_verification_failed", error=str(e))
         return None

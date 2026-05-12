@@ -18,6 +18,7 @@ from app.core.logging import logger
 
 _TOKEN_LIMIT: Dict[str, Any] = {"max_completion_tokens": settings.MAX_TOKENS}
 _API_KEY = SecretStr(settings.OPENAI_API_KEY)
+_BASE_URL = settings.LLM_BASE_URL
 
 
 class LLMRegistry:
@@ -66,6 +67,24 @@ class LLMRegistry:
                 frequency_penalty=0.1 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.0,
             ),
         },
+        {
+            "name": "deepseek-v4-flash",
+            "llm": ChatOpenAI(
+                model="deepseek-v4-flash",
+                api_key=_API_KEY,
+                base_url=_BASE_URL,
+                model_kwargs=_TOKEN_LIMIT,
+            ),
+        },
+        {
+            "name": "deepseek-v4-pro",
+            "llm": ChatOpenAI(
+                model="deepseek-v4-pro",
+                api_key=_API_KEY,
+                base_url=_BASE_URL,
+                model_kwargs=_TOKEN_LIMIT,
+            ),
+        },
     ]
 
     @classmethod
@@ -93,7 +112,7 @@ class LLMRegistry:
 
         if kwargs:
             logger.debug("creating_llm_with_custom_args", model_name=model_name, custom_args=list(kwargs.keys()))
-            return ChatOpenAI(model=model_name, api_key=_API_KEY, **kwargs)
+            return ChatOpenAI(model=model_name, api_key=_API_KEY, base_url=_BASE_URL, **kwargs)
 
         logger.debug("using_default_llm_instance", model_name=model_name)
         return model_entry["llm"]

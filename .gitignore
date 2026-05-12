@@ -21,3 +21,12 @@ wheels/
 
 # Reports
 evals/reports/
+
+# Profiles
+profiles/
+
+# Claude
+.claude
+
+# Vscode
+.vscode
