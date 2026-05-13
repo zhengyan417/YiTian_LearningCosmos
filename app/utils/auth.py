@@ -17,43 +17,51 @@ from app.schemas.auth import Token
 from app.utils.sanitization import sanitize_string
 
 
-def create_access_token(thread_id: str, expires_delta: Optional[timedelta] = None) -> Token:
-    """Create a new access token for a thread.
+def create_access_token(
+    user_id: str, session_id: Optional[str] = None, expires_delta: Optional[timedelta] = None
+) -> Token:
+    """Create a new access token.
 
     Args:
-        thread_id: The unique thread ID for the conversation.
+        user_id: The user ID (stored in the JWT ``sub`` claim).
+        session_id: Optional session ID (stored in the ``sid`` claim).
         expires_delta: Optional expiration time delta.
 
     Returns:
         Token: The generated access token.
     """
+    now = datetime.now(UTC)
     if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+        expire = now + timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
 
-    to_encode = {
-        "sub": thread_id,
+    jti_slug = session_id if session_id else user_id
+    to_encode: dict = {
+        "sub": user_id,
         "exp": expire,
-        "iat": datetime.now(UTC),
-        "jti": sanitize_string(f"{thread_id}-{datetime.now(UTC).timestamp()}"),  # Add unique token identifier
+        "iat": now,
+        "jti": sanitize_string(f"{jti_slug}-{now.timestamp()}"),
     }
+    if session_id:
+        to_encode["sid"] = session_id
 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
-    logger.info("token_created", thread_id=thread_id, expires_at=expire.isoformat())
+    logger.info("token_created", user_id=user_id, session_id=session_id, expires_at=expire.isoformat())
 
     return Token(access_token=encoded_jwt, expires_at=expire)
 
 
-def verify_token(token: str) -> Optional[str]:
-    """Verify a JWT token and return the thread ID.
+def verify_token(token: str) -> Optional[dict]:
+    """Verify a JWT token and return the decoded payload.
 
     Args:
         token: The JWT token to verify.
 
     Returns:
-        Optional[str]: The thread ID if token is valid, None otherwise.
+        Optional[dict]: The decoded JWT payload if valid, ``None`` otherwise.
+        The payload contains at least ``sub`` (user_id) and optionally ``sid`` (session_id).
 
     Raises:
         ValueError: If the token format is invalid
@@ -70,13 +78,13 @@ def verify_token(token: str) -> Optional[str]:
 
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        thread_id: str | None = payload.get("sub")
-        if thread_id is None:
-            logger.warning("token_missing_thread_id")
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            logger.warning("token_missing_sub")
             return None
 
-        logger.info("token_verified", thread_id=thread_id)
-        return thread_id
+        logger.info("token_verified", user_id=user_id, session_id=payload.get("sid"))
+        return payload
 
     except InvalidTokenError as e:
         logger.error("token_verification_failed", error=str(e))

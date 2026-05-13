@@ -155,9 +155,20 @@ class Settings:
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
         self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "60"))
 
+        # Deep Research Configuration
+        self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+        self.RESEARCH_MAX_CONCURRENT_SUBAGENTS = int(os.getenv("RESEARCH_MAX_CONCURRENT_SUBAGENTS", "3"))
+        self.RESEARCH_MAX_SUBTASKS = int(os.getenv("RESEARCH_MAX_SUBTASKS", "3"))
+        self.RESEARCH_MAX_SEARCHES_PER_SUBAGENT = int(os.getenv("RESEARCH_MAX_SEARCHES_PER_SUBAGENT", "5"))
+        self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
+        self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
+
+        # DashScope API Key (used by mem0ai embedder with text-embedding-v4)
+        self.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+
         # Long term memory Configuration
-        self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "gpt-5-nano")
-        self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-3-small")
+        self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "deepseek-v4-flash")
+        self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-v4")
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
         # JWT Configuration
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
@@ -203,6 +214,7 @@ class Settings:
             "login": ["20 per minute"],
             "root": ["10 per minute"],
             "health": ["20 per minute"],
+            "research": ["5 per minute"],
         }
 
         # Update rate limit endpoints from environment variables
@@ -214,8 +226,8 @@ class Settings:
                 self.RATE_LIMIT_ENDPOINTS[endpoint] = value
 
         # Evaluation Configuration
-        self.EVALUATION_LLM = os.getenv("EVALUATION_LLM", "gpt-5")
-        self.EVALUATION_BASE_URL = os.getenv("EVALUATION_BASE_URL", "https://api.openai.com/v1")
+        self.EVALUATION_LLM = os.getenv("EVALUATION_LLM", "deepseek-v4-pro")
+        self.EVALUATION_BASE_URL = os.getenv("EVALUATION_BASE_URL", "https://api.deepseek.com/v1")
         self.EVALUATION_API_KEY = os.getenv("EVALUATION_API_KEY", self.OPENAI_API_KEY)
         self.EVALUATION_SLEEP_TIME = int(os.getenv("EVALUATION_SLEEP_TIME", "10"))
 
