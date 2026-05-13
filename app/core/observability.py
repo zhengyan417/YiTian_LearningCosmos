@@ -1,10 +1,12 @@
 """Observability module for the application."""
 
-from langfuse import Langfuse
-from langfuse.langchain import CallbackHandler
+from typing import TYPE_CHECKING
 
 from app.core.config import settings
 from app.core.logging import logger
+
+if TYPE_CHECKING:
+    pass
 
 
 def langfuse_init():
@@ -12,6 +14,8 @@ def langfuse_init():
     if not settings.LANGFUSE_TRACING_ENABLED:
         logger.debug("langfuse_tracing_disabled")
         return
+
+    from langfuse import Langfuse
 
     langfuse = Langfuse(
         tracing_enabled=settings.LANGFUSE_TRACING_ENABLED,
@@ -28,13 +32,17 @@ def langfuse_init():
         logger.debug("langfuse_auth_failure")
 
 
-def get_langfuse_callback_handler() -> CallbackHandler:
+_langfuse_handler = None
+
+
+def get_langfuse_callback_handler():
     """Create a Langfuse CallbackHandler for tracking LLM interactions.
 
-    Returns:
-        CallbackHandler: Configured Langfuse callback handler.
+    Only initializes when tracing is enabled.
     """
-    return CallbackHandler()
+    global _langfuse_handler
+    if _langfuse_handler is None and settings.LANGFUSE_TRACING_ENABLED:
+        from langfuse.langchain import CallbackHandler
 
-
-langfuse_callback_handler = get_langfuse_callback_handler()
+        _langfuse_handler = CallbackHandler()
+    return _langfuse_handler

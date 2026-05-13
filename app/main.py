@@ -19,6 +19,7 @@ from asgi_correlation_id import CorrelationIdMiddleware
 
 from app.api.v1.api import api_router
 from app.api.v1.chatbot import agent
+from app.api.v1.research import agent as research_agent
 from app.core.cache import cache_service
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -62,6 +63,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("graph_pre_warm_failed", error=str(e))
 
+    # Pre-warm the deep research agent (its own checkpointer + connection pool)
+    try:
+        await research_agent.create_graph()
+        logger.info("research_graph_pre_warmed")
+    except Exception as e:
+        logger.exception("research_graph_pre_warm_failed", error=str(e))
+
     # Pre-warm mem0 AsyncMemory: initializes pgvector connection and schema check
     # so the first search() cache miss or add() doesn't pay the ~130ms cold-init cost
     try:
@@ -76,6 +84,9 @@ async def lifespan(app: FastAPI):
     if agent._connection_pool:
         await agent._connection_pool.close()
         logger.info("connection_pool_closed")
+    if research_agent._connection_pool:
+        await research_agent._connection_pool.close()
+        logger.info("research_connection_pool_closed")
     logger.info("application_shutdown")
 
 

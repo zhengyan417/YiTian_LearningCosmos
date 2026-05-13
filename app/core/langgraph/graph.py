@@ -48,7 +48,7 @@ from app.core.config import (
 from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
-from app.core.observability import langfuse_callback_handler
+from app.core.observability import get_langfuse_callback_handler
 from app.core.prompts import load_system_prompt
 from app.schemas import (
     GraphState,
@@ -294,7 +294,9 @@ class LangGraphAgent:
             list[Message]: The response from the LLM.
         """
         graph = await self._get_graph()
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        callbacks: list[BaseCallbackHandler] = (
+            [get_langfuse_callback_handler()] if settings.LANGFUSE_TRACING_ENABLED else []
+        )
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,
@@ -364,7 +366,9 @@ class LangGraphAgent:
         Yields:
             str: Tokens of the LLM response.
         """
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        callbacks: list[BaseCallbackHandler] = (
+            [get_langfuse_callback_handler()] if settings.LANGFUSE_TRACING_ENABLED else []
+        )
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,

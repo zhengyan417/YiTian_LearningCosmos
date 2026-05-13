@@ -10,15 +10,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from app.core.config import (
-    Environment,
-    settings,
-)
+from app.core.config import settings
 from app.core.logging import logger
 
-_TOKEN_LIMIT: Dict[str, Any] = {"max_completion_tokens": settings.MAX_TOKENS}
 _API_KEY = SecretStr(settings.OPENAI_API_KEY)
 _BASE_URL = settings.LLM_BASE_URL
+_MAX_TOKENS = settings.MAX_TOKENS
 
 
 class LLMRegistry:
@@ -30,50 +27,12 @@ class LLMRegistry:
 
     LLMS: List[Dict[str, Any]] = [
         {
-            "name": "gpt-5-mini",
-            "llm": ChatOpenAI(
-                model="gpt-5-mini",
-                api_key=_API_KEY,
-                model_kwargs=_TOKEN_LIMIT,
-                reasoning={"effort": "low"},
-            ),
-        },
-        {
-            "name": "gpt-5.4",
-            "llm": ChatOpenAI(
-                model="gpt-5",
-                api_key=_API_KEY,
-                model_kwargs=_TOKEN_LIMIT,
-                reasoning={"effort": "medium"},
-            ),
-        },
-        {
-            "name": "gpt-5.4-nano",
-            "llm": ChatOpenAI(
-                model="gpt-5.4-nano",
-                api_key=_API_KEY,
-                model_kwargs=_TOKEN_LIMIT,
-                reasoning={"effort": "low"},
-            ),
-        },
-        {
-            "name": "gpt-5",
-            "llm": ChatOpenAI(
-                model="gpt-5",
-                api_key=_API_KEY,
-                model_kwargs=_TOKEN_LIMIT,
-                top_p=0.95 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.8,
-                presence_penalty=0.1 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.0,
-                frequency_penalty=0.1 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.0,
-            ),
-        },
-        {
             "name": "deepseek-v4-flash",
             "llm": ChatOpenAI(
                 model="deepseek-v4-flash",
                 api_key=_API_KEY,
                 base_url=_BASE_URL,
-                model_kwargs=_TOKEN_LIMIT,
+                max_completion_tokens=_MAX_TOKENS,
             ),
         },
         {
@@ -82,7 +41,7 @@ class LLMRegistry:
                 model="deepseek-v4-pro",
                 api_key=_API_KEY,
                 base_url=_BASE_URL,
-                model_kwargs=_TOKEN_LIMIT,
+                max_completion_tokens=_MAX_TOKENS,
             ),
         },
     ]
