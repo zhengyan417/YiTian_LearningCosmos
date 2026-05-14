@@ -163,6 +163,16 @@ class Settings:
         self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
         self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
 
+        # A2A (Agent-to-Agent) Multi-Agent Configuration
+        # The coordinator is an A2A client; research/search/writer/coder are A2A servers
+        # mounted under A2A_MOUNT_PREFIX. A2A_BASE_URL must be the externally reachable
+        # origin of this process so the coordinator can resolve each specialist's card.
+        self.A2A_ENABLED = os.getenv("A2A_ENABLED", "true").lower() in ("true", "1", "t", "yes")
+        self.A2A_BASE_URL = os.getenv("A2A_BASE_URL", "http://localhost:8000")
+        self.A2A_MOUNT_PREFIX = os.getenv("A2A_MOUNT_PREFIX", "/a2a")
+        self.A2A_COORDINATOR_MAX_PARALLEL = int(os.getenv("A2A_COORDINATOR_MAX_PARALLEL", "3"))
+        self.A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "120.0"))
+
         # DashScope API Key (used by mem0ai embedder with text-embedding-v4)
         self.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 
@@ -215,6 +225,7 @@ class Settings:
             "root": ["10 per minute"],
             "health": ["20 per minute"],
             "research": ["5 per minute"],
+            "agents": ["15 per minute"],
         }
 
         # Update rate limit endpoints from environment variables

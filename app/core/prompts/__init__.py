@@ -20,6 +20,11 @@ SESSION_TITLE_PROMPT = _read("session_title.md")
 _RESEARCH_PLANNER_TEMPLATE = _read("research_planner.md")
 _RESEARCH_SUBAGENT_TEMPLATE = _read("research_subagent.md")
 _RESEARCH_SYNTHESIS_TEMPLATE = _read("research_synthesis.md")
+_A2A_COORDINATOR_ROUTER_TEMPLATE = _read("a2a_coordinator_router.md")
+_A2A_COORDINATOR_SYNTHESIS_TEMPLATE = _read("a2a_coordinator_synthesis.md")
+_A2A_SEARCH_TEMPLATE = _read("a2a_search.md")
+_A2A_WRITER_TEMPLATE = _read("a2a_writer.md")
+_A2A_CODER_TEMPLATE = _read("a2a_coder.md")
 
 
 def _now() -> str:
@@ -60,3 +65,32 @@ def load_research_synthesis_prompt(research_request: str, findings: str) -> str:
         research_request=research_request,
         findings=findings,
     )
+
+
+def load_a2a_coordinator_router_prompt() -> str:
+    """Load the A2A coordinator routing prompt."""
+    return _A2A_COORDINATOR_ROUTER_TEMPLATE.format(current_date_and_time=_now())
+
+
+def load_a2a_coordinator_synthesis_prompt(query: str, findings: str) -> str:
+    """Load the A2A coordinator synthesis prompt with the user query and specialist findings inlined."""
+    return _A2A_COORDINATOR_SYNTHESIS_TEMPLATE.format(
+        current_date_and_time=_now(),
+        query=query,
+        findings=findings,
+    )
+
+
+def load_a2a_search_prompt() -> str:
+    """Load the A2A search specialist system prompt."""
+    return _A2A_SEARCH_TEMPLATE.format(current_date_and_time=_now())
+
+
+def load_a2a_writer_prompt() -> str:
+    """Load the A2A writer specialist system prompt."""
+    return _A2A_WRITER_TEMPLATE.format(current_date_and_time=_now())
+
+
+def load_a2a_coder_prompt() -> str:
+    """Load the A2A coder specialist system prompt."""
+    return _A2A_CODER_TEMPLATE.format(current_date_and_time=_now())

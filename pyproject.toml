@@ -44,6 +44,7 @@ dependencies = [
     "markdownify>=1.2.0",
     "httpx>=0.28.1",
     "redis>=7.4.0",
+    "a2a-sdk[http-server]==0.3.26",
 ]
 
 [project.optional-dependencies]

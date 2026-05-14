@@ -1,5 +1,7 @@
 """Long-term memory service using mem0ai with DashScope text-embedding-v4 + DeepSeek LLM."""
 
+import inspect
+
 from mem0 import AsyncMemory
 
 from app.core.cache import cache_key, cache_service
@@ -16,7 +18,7 @@ class MemoryService:
 
     async def _get_memory(self) -> AsyncMemory:
         if self._memory is None:
-            self._memory = await AsyncMemory.from_config(
+            result = AsyncMemory.from_config(
                 config_dict={
                     "vector_store": {
                         "provider": "pgvector",
@@ -48,6 +50,12 @@ class MemoryService:
                     },
                 }
             )
+            # mem0ai changed from_config between sync/async across versions.
+            # Detect at runtime so we work with either.
+            if inspect.iscoroutine(result):
+                self._memory = await result
+            else:
+                self._memory = result
         return self._memory
 
     async def initialize(self) -> None:

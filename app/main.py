@@ -20,6 +20,12 @@ from asgi_correlation_id import CorrelationIdMiddleware
 from app.api.v1.api import api_router
 from app.api.v1.chatbot import agent
 from app.api.v1.research import agent as research_agent
+from app.core.a2a.client import a2a_specialist_client
+from app.core.a2a.server import mount_a2a_servers
+from app.core.a2a.specialists import (
+    shutdown_specialists,
+    warm_up_specialists,
+)
 from app.core.cache import cache_service
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -70,6 +76,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("research_graph_pre_warm_failed", error=str(e))
 
+    # Pre-warm the A2A research specialist (its own deep research graph + pool)
+    try:
+        await warm_up_specialists()
+        logger.info("a2a_specialists_pre_warmed")
+    except Exception as e:
+        logger.exception("a2a_specialists_pre_warm_failed", error=str(e))
+
+    # Initialize the coordinator's shared A2A client (httpx connection pool)
+    try:
+        await a2a_specialist_client.initialize()
+    except Exception as e:
+        logger.exception("a2a_client_init_failed", error=str(e))
+
     # Pre-warm mem0 AsyncMemory: initializes pgvector connection and schema check
     # so the first search() cache miss or add() doesn't pay the ~130ms cold-init cost
     try:
@@ -81,6 +100,8 @@ async def lifespan(app: FastAPI):
 
     # Cleanup on shutdown
     await cache_service.close()
+    await a2a_specialist_client.close()
+    await shutdown_specialists()
     if agent._connection_pool:
         await agent._connection_pool.close()
         logger.info("connection_pool_closed")
@@ -162,6 +183,10 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Mount the A2A specialist servers (research / search / writer / coder) as
+# sub-applications. The /agents coordinator endpoint reaches them as an A2A client.
+mount_a2a_servers(app)
 
 
 @app.get("/")
