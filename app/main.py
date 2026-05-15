@@ -28,6 +28,15 @@ from app.core.a2a.specialists import (
 )
 from app.core.cache import cache_service
 from app.core.config import settings
+from app.core.langgraph.skills import SkillRegistry
+from app.core.langgraph.skills.data_query import (
+    shutdown as data_query_shutdown,
+    warm_up as data_query_warm_up,
+)
+from app.core.langgraph.skills.deep_research_proxy import (
+    shutdown as deep_research_proxy_shutdown,
+    warm_up as deep_research_proxy_warm_up,
+)
 from app.core.limiter import limiter
 from app.core.logging import logger
 from app.core.metrics import setup_metrics
@@ -61,6 +70,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("cache_initialization_failed", error=str(e))
 
+    # Discover and register every skill before pre-warming the agent's graph,
+    # so LangGraphAgent._bind_skills sees the complete skill set on first call.
+    try:
+        SkillRegistry.discover()
+    except Exception as e:
+        logger.exception("skill_discovery_failed", error=str(e))
+
     # Pre-warm the LangGraph agent: create graph + connection pool at startup
     # to avoid cold-start latency on the first request
     try:
@@ -83,6 +99,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("a2a_specialists_pre_warm_failed", error=str(e))
 
+    # Pre-warm the deep_research_proxy skill (its own DeepResearchAgent instance)
+    # so the first LLM-triggered "deep research" tool call doesn't pay cold-start.
+    try:
+        await deep_research_proxy_warm_up()
+    except Exception as e:
+        logger.exception("deep_research_proxy_pre_warm_failed", error=str(e))
+
+    # Open the data_query SQL pool (no-op when DATA_QUERY_READONLY_DSN is unset).
+    try:
+        await data_query_warm_up()
+    except Exception as e:
+        logger.exception("data_query_pre_warm_failed", error=str(e))
+
     # Initialize the coordinator's shared A2A client (httpx connection pool)
     try:
         await a2a_specialist_client.initialize()
@@ -102,6 +131,8 @@ async def lifespan(app: FastAPI):
     await cache_service.close()
     await a2a_specialist_client.close()
     await shutdown_specialists()
+    await deep_research_proxy_shutdown()
+    await data_query_shutdown()
     if agent._connection_pool:
         await agent._connection_pool.close()
         logger.info("connection_pool_closed")

@@ -31,13 +31,27 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def load_system_prompt(username: Optional[str] = None, **kwargs):
-    """Load the system prompt from the cached template."""
+def load_system_prompt(
+    username: Optional[str] = None,
+    *,
+    tool_usage_guide: str = "",
+    **kwargs,
+):
+    """Load the system prompt from the cached template.
+
+    Args:
+        username: Optional display name for the user, injected as ``{user_context}``.
+        tool_usage_guide: Markdown rendered by ``SkillRegistry.render_usage_guide``.
+            Empty value falls back to a placeholder so the template still renders
+            cleanly when no skills are registered.
+        **kwargs: Additional template variables (e.g. ``long_term_memory``).
+    """
     user_context = f"# User\nYou are talking to {username}.\n" if username else ""
     return _SYSTEM_PROMPT_TEMPLATE.format(
         agent_name=settings.PROJECT_NAME + " Agent",
         current_date_and_time=_now(),
         user_context=user_context,
+        tool_usage_guide=tool_usage_guide or "_No skills available._",
         **kwargs,
     )
 

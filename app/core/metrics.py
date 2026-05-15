@@ -40,6 +40,21 @@ session_names_generated_total = Counter(
     ["status"],  # "success" | "error"
 )
 
+# Skill metrics — recorded by LangGraphAgent._tool_call so every tool invocation
+# is tagged with the skill that owns it (joined via SkillRegistry).
+skill_invocations_total = Counter(
+    "skill_invocations_total",
+    "Total LLM-triggered tool invocations grouped by owning skill",
+    ["skill", "tool", "status"],  # status = "success" | "failed"
+)
+
+skill_duration_seconds = Histogram(
+    "skill_duration_seconds",
+    "Wall-clock duration of skill tool invocations",
+    ["skill", "tool"],
+    buckets=[0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 90.0],
+)
+
 
 def setup_metrics(app):
     """Set up Prometheus metrics middleware and endpoints.

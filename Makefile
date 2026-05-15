@@ -77,6 +77,9 @@ eval-quick:
 eval-no-report:
 	@$(call run_with_env,python -m evals.main --no-report)
 
+eval-routing:
+	@$(call run_with_env,uv run python -m evals.skill_routing.runner)
+
 # ---------------------------------------------------------------------------
 # Code quality
 # ---------------------------------------------------------------------------

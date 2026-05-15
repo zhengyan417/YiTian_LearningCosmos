@@ -1,6 +1,7 @@
 """This file contains the LangGraph Agent/workflow and interactions with the LLM."""
 
 import asyncio
+import time
 from typing import (
     AsyncGenerator,
     Optional,
@@ -16,6 +17,7 @@ from langchain_core.messages import (
     ToolMessage,
     convert_to_openai_messages,
 )
+from langchain_core.tools.base import BaseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import (
@@ -45,9 +47,13 @@ from app.core.config import (
     Environment,
     settings,
 )
-from app.core.langgraph.tools import tools
+from app.core.langgraph.skills import SkillRegistry
 from app.core.logging import logger
-from app.core.metrics import llm_inference_duration_seconds
+from app.core.metrics import (
+    llm_inference_duration_seconds,
+    skill_duration_seconds,
+    skill_invocations_total,
+)
 from app.core.observability import get_langfuse_callback_handler
 from app.core.prompts import load_system_prompt
 from app.schemas import (
@@ -74,17 +80,49 @@ class LangGraphAgent:
     """
 
     def __init__(self):
-        """Initialize the LangGraph Agent with necessary components."""
-        # Use the LLM service with tools bound
+        """Initialize the LangGraph Agent.
+
+        Tool binding is deferred to ``create_graph`` (which the FastAPI lifespan
+        pre-warms) so ``SkillRegistry.discover()`` has a chance to populate the
+        registry before we collect tools — module-level instantiation of this
+        agent runs *before* the lifespan startup hook fires.
+        """
         self.llm_service = llm_service
-        self.llm_service.bind_tools(tools)
-        self.tools_by_name = {tool.name: tool for tool in tools}
+        self.tools_by_name: dict[str, BaseTool] = {}
+        self.skill_by_tool: dict[str, str] = {}
+        self._tools_bound: bool = False
         self._connection_pool: Optional[PostgresConnPool] = None
         self._graph: Optional[CompiledStateGraph] = None
         logger.info(
             "langgraph_agent_initialized",
             model=settings.DEFAULT_LLM_MODEL,
             environment=settings.ENVIRONMENT.value,
+        )
+
+    def _bind_skills(self) -> None:
+        """Bind every enabled skill's tools to the LLM (idempotent).
+
+        Called from ``create_graph`` so ``SkillRegistry.discover()`` (run by the
+        FastAPI lifespan) has already populated the registry by the time we
+        flatten its tools.
+        """
+        if self._tools_bound:
+            return
+        self._tools_bound = True
+        by_name: dict[str, BaseTool] = {}
+        by_skill: dict[str, str] = {}
+        for skill in SkillRegistry.all():
+            for tool in skill.tools:
+                if tool.name not in by_name:
+                    by_name[tool.name] = tool
+                by_skill[tool.name] = skill.name
+        self.tools_by_name = by_name
+        self.skill_by_tool = by_skill
+        self.llm_service.bind_tools(list(by_name.values()))
+        logger.info(
+            "agent_skills_bound",
+            tool_count=len(by_name),
+            tools=list(by_name.keys()),
         )
 
     async def _get_connection_pool(self) -> Optional[PostgresConnPool]:
@@ -147,7 +185,11 @@ class LangGraphAgent:
 
         username = config.get("metadata", {}).get("username")
         thread_id = config.get("configurable", {}).get("thread_id")
-        SYSTEM_PROMPT = load_system_prompt(username=username, long_term_memory=state.long_term_memory)
+        SYSTEM_PROMPT = load_system_prompt(
+            username=username,
+            long_term_memory=state.long_term_memory,
+            tool_usage_guide=SkillRegistry.render_usage_guide(),
+        )
 
         # Prepare messages with system prompt
         messages = prepare_messages(state.messages, SYSTEM_PROMPT)
@@ -196,10 +238,22 @@ class LangGraphAgent:
         tool_calls = state.messages[-1].tool_calls
 
         async def _execute_tool(tool_call: dict) -> ToolMessage:
-            tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+            tool_name = tool_call["name"]
+            skill_name = self.skill_by_tool.get(tool_name, "unknown")
+            start = time.monotonic()
+            status = "success"
+            try:
+                tool_result = await self.tools_by_name[tool_name].ainvoke(tool_call["args"])
+            except Exception:
+                status = "failed"
+                raise
+            finally:
+                duration = time.monotonic() - start
+                skill_invocations_total.labels(skill=skill_name, tool=tool_name, status=status).inc()
+                skill_duration_seconds.labels(skill=skill_name, tool=tool_name).observe(duration)
             return ToolMessage(
                 content=tool_result,
-                name=tool_call["name"],
+                name=tool_name,
                 tool_call_id=tool_call["id"],
             )
 
@@ -219,6 +273,11 @@ class LangGraphAgent:
         """
         if self._graph is None:
             try:
+                # Bind skill tools before compiling so checkpointer / LLM see them.
+                # Safe to call here because the FastAPI lifespan invokes
+                # SkillRegistry.discover() before pre-warming this graph.
+                self._bind_skills()
+
                 graph_builder = StateGraph(GraphState)
                 graph_builder.add_node("chat", self._chat, destinations=("tool_call", END))
                 graph_builder.add_node(
