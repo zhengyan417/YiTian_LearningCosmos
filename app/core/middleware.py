@@ -22,10 +22,6 @@ from app.core.logging import (
     clear_context,
     logger,
 )
-from app.core.metrics import (
-    http_request_duration_seconds,
-    http_requests_total,
-)
 
 if TYPE_CHECKING:
     from pyinstrument import Profiler  # pyright: ignore[reportMissingImports]
@@ -42,39 +38,6 @@ else:
         Profiler = None
         JSONRenderer = None
         PYINSTRUMENT_AVAILABLE = False
-
-
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Middleware for tracking HTTP request metrics."""
-
-    @override
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Track metrics for each request.
-
-        Args:
-            request: The incoming request
-            call_next: The next middleware or route handler
-
-        Returns:
-            Response: The response from the application
-        """
-        start_time = time.time()
-        status_code = 500
-
-        try:
-            response = await call_next(request)
-            status_code = response.status_code
-        except Exception:
-            raise
-        finally:
-            duration = time.time() - start_time
-
-            # Record metrics
-            http_requests_total.labels(method=request.method, endpoint=request.url.path, status=status_code).inc()
-
-            http_request_duration_seconds.labels(method=request.method, endpoint=request.url.path).observe(duration)
-
-        return response
 
 
 class LoggingContextMiddleware(BaseHTTPMiddleware):

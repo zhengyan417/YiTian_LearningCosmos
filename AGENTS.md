@@ -11,8 +11,11 @@ make lint             # ruff check .
 make format           # ruff format .
 make typecheck        # uv run pyright (static type check)
 make check            # lint + typecheck
-make eval             # Run LLM evals (interactive)
-make eval-quick       # Run LLM evals (default settings)
+make eval             # Trace post-hoc eval (Langfuse traffic)
+make eval-quick       # Trace eval, skip JSON report
+make eval-routing     # Coordinator routing accuracy
+make eval-quality AGENT=research|search|writer|coder  # Per-specialist quality
+make eval-all         # All evals in sequence
 make docker-run       # Docker: API + DB (development)
 make docker-compose-up ENV=development  # Full stack: API + Prometheus + Grafana
 ```
@@ -36,7 +39,7 @@ app/
   schemas/         # Pydantic request/response schemas + graph state
   services/        # Business logic services
   utils/           # Shared utilities
-evals/             # LLM evaluation framework (Langfuse-based)
+evals/             # Three eval runners: trace / routing / agent_quality (shared judge layer)
 scripts/           # Environment setup, Docker build scripts
 ```
 
@@ -147,10 +150,22 @@ This is a production-ready AI agent application built with:
 
 ## Testing & Evaluation
 
-- Implement metric-based evaluations for LLM outputs (see `evals/` directory)
-- Create custom evaluation metrics as markdown files in `evals/metrics/prompts/`
-- Use Langfuse traces for evaluation data sources
-- Generate JSON reports with success rates
+The `evals/` framework has three runners sharing a common LLM-judge layer
+(`evals/shared/`):
+
+- **Trace eval** (`make eval`) — post-hoc scores unscored Langfuse traces with
+  every metric prompt in `evals/metrics/prompts/`. Speaks the new
+  `MultiAgentResponse` trace shape; legacy `messages` shape falls back cleanly.
+- **Routing eval** (`make eval-routing`) — drives `coordinator._route` against
+  an offline golden set in `evals/routing/golden.jsonl`. Multiset equality on
+  delegated agent names; empty `expected_agents` means "answer directly".
+- **Agent quality eval** (`make eval-quality AGENT=<name>`) — runs one
+  specialist end-to-end via `agent.run()` and scores the output with its
+  per-agent metric stack. Goldens in `evals/agent_quality/goldens/<name>.jsonl`.
+
+Add new judge metrics by dropping a `<name>.md` into `evals/metrics/prompts/`.
+Metrics where lower-is-better (`hallucination`, `toxicity`) are auto-flipped
+during aggregation. Reports go to `evals/reports/<eval>_<timestamp>.json`.
 
 ## Configuration Management
 

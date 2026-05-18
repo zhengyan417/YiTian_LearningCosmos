@@ -16,8 +16,8 @@ sequenceDiagram
     C->>A: POST /auth/session<br/>Bearer: 用户令牌
     A-->>C: {session_id, token}
 
-    C->>A: POST /chatbot/chat<br/>Bearer: 会话令牌
-    A-->>C: {messages}
+    C->>A: POST /api/v1/chat<br/>Bearer: 会话令牌
+    A-->>C: {answer, delegations, routing_reasoning}
 ```
 
 API 使用**两种令牌作用域**：

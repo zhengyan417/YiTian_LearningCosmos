@@ -145,55 +145,22 @@ class Settings:
         self.LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
         self.LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
-        # LangGraph Configuration
+        # LLM Configuration (shared by all agents)
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         self.LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "deepseek-v4-flash")
-        self.SESSION_NAMING_ENABLED = os.getenv("SESSION_NAMING_ENABLED", "true").lower() == "true"
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
-        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
+        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "16000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
-        self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "60"))
+        self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "180"))
 
-        # Deep Research Configuration
+        # Research Agent Configuration (LangGraph: plan → dispatch → synthesize)
         self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
         self.RESEARCH_MAX_CONCURRENT_SUBAGENTS = int(os.getenv("RESEARCH_MAX_CONCURRENT_SUBAGENTS", "3"))
         self.RESEARCH_MAX_SUBTASKS = int(os.getenv("RESEARCH_MAX_SUBTASKS", "3"))
         self.RESEARCH_MAX_SEARCHES_PER_SUBAGENT = int(os.getenv("RESEARCH_MAX_SEARCHES_PER_SUBAGENT", "5"))
         self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
         self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
-
-        # Skills Configuration
-        # Comma-separated whitelist of enabled skill names. Empty value enables every
-        # skill that registers itself via SkillRegistry.discover(). Set this to gate
-        # skills (e.g. "web_research,interactive") for safer rollout.
-        self.SKILLS_ENABLED = os.getenv("SKILLS_ENABLED", "")
-        # "all" exposes every registered skill (core + advanced); "core" hides the
-        # advanced/heavy ones (currently deep_research_proxy, multi_agent_proxy)
-        # from both the LLM tool set and the system prompt to keep the budget tight.
-        self.ENABLED_SKILLS_TIER = os.getenv("ENABLED_SKILLS_TIER", "all")
-
-        # code_ops skill — read-only filesystem access.
-        # Whitelist of root directories the LLM may inspect. Empty value disables
-        # the skill entirely (it will not be registered) so paths like /etc or
-        # C:\Windows can never be reached. Paths must be absolute.
-        self.CODE_OPS_ALLOWED_ROOTS = parse_list_from_env("CODE_OPS_ALLOWED_ROOTS", [])
-        self.CODE_OPS_MAX_READ_BYTES = int(os.getenv("CODE_OPS_MAX_READ_BYTES", "100000"))
-        self.CODE_OPS_MAX_LIST_ITEMS = int(os.getenv("CODE_OPS_MAX_LIST_ITEMS", "200"))
-        self.CODE_OPS_MAX_GREP_MATCHES = int(os.getenv("CODE_OPS_MAX_GREP_MATCHES", "100"))
-        self.CODE_OPS_MAX_GREP_FILES = int(os.getenv("CODE_OPS_MAX_GREP_FILES", "5000"))
-
-        # data_query skill — read-only SQL + whitelisted HTTP GET.
-        # DSN MUST point at a read-only PostgreSQL account (DB-level enforcement is
-        # the primary defence; the regex check in safety.py is the secondary one).
-        # Empty DSN disables the SQL tool; empty host list disables the HTTP tool;
-        # both empty disables the skill entirely (it will not be registered).
-        self.DATA_QUERY_READONLY_DSN = os.getenv("DATA_QUERY_READONLY_DSN", "")
-        self.DATA_QUERY_ALLOWED_HOSTS = parse_list_from_env("DATA_QUERY_ALLOWED_HOSTS", [])
-        self.DATA_QUERY_SQL_TIMEOUT_SECONDS = int(os.getenv("DATA_QUERY_SQL_TIMEOUT_SECONDS", "5"))
-        self.DATA_QUERY_SQL_MAX_ROWS = int(os.getenv("DATA_QUERY_SQL_MAX_ROWS", "100"))
-        self.DATA_QUERY_HTTP_TIMEOUT_SECONDS = float(os.getenv("DATA_QUERY_HTTP_TIMEOUT_SECONDS", "10.0"))
-        self.DATA_QUERY_HTTP_MAX_RESPONSE_BYTES = int(os.getenv("DATA_QUERY_HTTP_MAX_RESPONSE_BYTES", "200000"))
 
         # A2A (Agent-to-Agent) Multi-Agent Configuration
         # The coordinator is an A2A client; research/search/writer/coder are A2A servers
@@ -203,7 +170,7 @@ class Settings:
         self.A2A_BASE_URL = os.getenv("A2A_BASE_URL", "http://localhost:8000")
         self.A2A_MOUNT_PREFIX = os.getenv("A2A_MOUNT_PREFIX", "/a2a")
         self.A2A_COORDINATOR_MAX_PARALLEL = int(os.getenv("A2A_COORDINATOR_MAX_PARALLEL", "3"))
-        self.A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "120.0"))
+        self.A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "300.0"))
 
         # DashScope API Key (used by mem0ai embedder with text-embedding-v4)
         self.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")

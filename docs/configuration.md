@@ -31,10 +31,9 @@ cp .env.example .env.development
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | 否 | LLM API 地址，使用 DeepSeek 时设为 `https://api.deepseek.com/v1` |
 | `DEFAULT_LLM_MODEL` | `deepseek-v4-flash` | 否 | 起始模型 — 降级顺序见 [LLM 服务](llm-service.md) |
 | `DEFAULT_LLM_TEMPERATURE` | `0.2` | 否 | 聊天补全的温度参数 |
-| `MAX_TOKENS` | `2000` | 否 | 每次 LLM 响应的最大 token 数 |
+| `MAX_TOKENS` | `16000` | 否 | 每次 LLM 响应的最大 token 数 |
 | `MAX_LLM_CALL_RETRIES` | `3` | 否 | 切换降级模型前每个模型的重试次数 |
-| `LLM_TOTAL_TIMEOUT` | `60` | 否 | 整个降级循环的最大秒数 |
-| `SESSION_NAMING_ENABLED` | `true` | 否 | 是否在用户首条消息时通过 LLM 后台任务自动生成会话标题 |
+| `LLM_TOTAL_TIMEOUT` | `180` | 否 | 整个降级循环的最大秒数 |
 
 ---
 
@@ -69,8 +68,8 @@ cp .env.example .env.development
 | `A2A_ENABLED` | `true` | 是否启用 A2A 多智能体系统 |
 | `A2A_BASE_URL` | `http://localhost:8000` | 本进程的外部可访问地址，协调者据此解析各专家的 AgentCard |
 | `A2A_MOUNT_PREFIX` | `/a2a` | A2A 服务器挂载前缀 |
-| `A2A_COORDINATOR_MAX_PARALLEL` | `3` | 协调者并行委派的最大数量 |
-| `A2A_CLIENT_TIMEOUT` | `120.0` | A2A 客户端调用超时秒数 |
+| `A2A_COORDINATOR_MAX_PARALLEL` | `2` | 协调者并行委派的最大数量 |
+| `A2A_CLIENT_TIMEOUT` | `300.0` | A2A 客户端调用超时秒数 |
 
 ---
 
@@ -80,10 +79,10 @@ cp .env.example .env.development
 | --- | --- | --- |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL 主机 |
 | `POSTGRES_PORT` | `5432` | PostgreSQL 端口 |
-| `POSTGRES_DB` | `food_order_db` | 数据库名 |
-| `POSTGRES_USER` | `postgres` | 数据库用户 |
-| `POSTGRES_PASSWORD` | `postgres` | 数据库密码 |
-| `POSTGRES_POOL_SIZE` | `20` | SQLAlchemy 连接池大小 |
+| `POSTGRES_DB` | `mydb` | 数据库名 |
+| `POSTGRES_USER` | `myuser` | 数据库用户 |
+| `POSTGRES_PASSWORD` | `mypassword` | 数据库密码 |
+| `POSTGRES_POOL_SIZE` | `5` | SQLAlchemy 连接池大小 |
 | `POSTGRES_MAX_OVERFLOW` | `10` | 超出连接池大小的最大溢出连接数 |
 
 ---
@@ -128,16 +127,11 @@ cp .env.example .env.development
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `RATE_LIMIT_DEFAULT` | `200 per day, 50 per hour` | 兜底限制 |
-| `RATE_LIMIT_CHAT` | `30 per minute` | POST /chat |
-| `RATE_LIMIT_CHAT_STREAM` | `20 per minute` | POST /chat/stream |
-| `RATE_LIMIT_MESSAGES` | `50 per minute` | GET/DELETE /messages |
-| `RATE_LIMIT_LOGIN` | `20 per minute` | POST /auth/login |
-| `RATE_LIMIT_REGISTER` | `10 per hour` | POST /auth/register |
-| `RATE_LIMIT_RESEARCH` | `5 per minute` | POST /research |
-| `RATE_LIMIT_AGENTS` | `15 per minute` | POST /agents/chat |
-| `RATE_LIMIT_ROOT` | `10 per minute` | GET / |
-| `RATE_LIMIT_HEALTH` | `20 per minute` | GET /health |
+| `RATE_LIMIT_DEFAULT` | `1000 per day, 200 per hour` | 兜底限制（开发环境） |
+| `RATE_LIMIT_CHAT` | `100 per minute` | POST /api/v1/chat |
+| `RATE_LIMIT_LOGIN` | `100 per minute` | POST /auth/login |
+| `RATE_LIMIT_RESEARCH` | `5 per minute` | 深度研究（Coordinator 内部触发） |
+| `RATE_LIMIT_HEALTH` | `60 per minute` | GET /health |
 
 当配置了 Valkey 时，限流在所有应用实例间共享。未配置时限流为单进程级别。
 

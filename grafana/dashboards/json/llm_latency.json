@@ -24,11 +24,11 @@
       },
       {
         "type": "graph",
-        "title": "LLM Stream Inference Duration (p95)",
+        "title": "LLM Inference Duration (Average)",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(llm_stream_duration_seconds_bucket[1m]))",
-            "legendFormat": "{{model}} (stream)",
+            "expr": "rate(llm_inference_duration_seconds_sum[1m]) / rate(llm_inference_duration_seconds_count[1m])",
+            "legendFormat": "{{model}} (avg)",
             "refId": "B"
           }
         ],
@@ -37,29 +37,16 @@
       },
       {
         "type": "graph",
-        "title": "LLM Inference Duration (Average)",
-        "targets": [
-          {
-            "expr": "rate(llm_inference_duration_seconds_sum[1m]) / rate(llm_inference_duration_seconds_count[1m])",
-            "legendFormat": "{{model}} (avg)",
-            "refId": "C"
-          }
-        ],
-        "datasource": "Prometheus",
-        "gridPos": { "x": 0, "y": 18, "w": 24, "h": 9 }
-      },
-      {
-        "type": "graph",
         "title": "LLM Inference Request Count",
         "targets": [
           {
             "expr": "rate(llm_inference_duration_seconds_count[1m])",
             "legendFormat": "{{model}}",
-            "refId": "D"
+            "refId": "C"
           }
         ],
         "datasource": "Prometheus",
-        "gridPos": { "x": 0, "y": 27, "w": 24, "h": 9 }
+        "gridPos": { "x": 0, "y": 18, "w": 24, "h": 9 }
       }
     ]
   },

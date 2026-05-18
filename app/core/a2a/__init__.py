@@ -1,7 +1,8 @@
-"""A2A multi-agent subsystem.
+"""A2A protocol adapter layer (server / client / executor).
 
-A Coordinator agent (an A2A client) routes user requests to four specialist
-agents exposed as A2A servers — research, search, writer, and coder. The
-servers are mounted onto the main FastAPI app; the coordinator reaches them
-over the A2A protocol through a shared client.
+This package contains *only* the protocol machinery — no agent logic. Each
+agent's domain code lives in its own package under ``app.agents.<name>``. The
+coordinator (``app.agents.coordinator``) is the A2A *client* and reaches the
+four specialist servers (``research`` / ``search`` / ``writer`` / ``coder``)
+over the A2A protocol via ``a2a_specialist_client``.
 """

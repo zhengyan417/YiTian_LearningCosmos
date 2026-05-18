@@ -17,32 +17,19 @@ from slowapi.errors import RateLimitExceeded
 
 from asgi_correlation_id import CorrelationIdMiddleware
 
+from starlette_prometheus import PrometheusMiddleware
+
+from app.agents import AGENT_REGISTRY
 from app.api.v1.api import api_router
-from app.api.v1.chatbot import agent
-from app.api.v1.research import agent as research_agent
 from app.core.a2a.client import a2a_specialist_client
 from app.core.a2a.server import mount_a2a_servers
-from app.core.a2a.specialists import (
-    shutdown_specialists,
-    warm_up_specialists,
-)
 from app.core.cache import cache_service
 from app.core.config import settings
-from app.core.langgraph.skills import SkillRegistry
-from app.core.langgraph.skills.data_query import (
-    shutdown as data_query_shutdown,
-    warm_up as data_query_warm_up,
-)
-from app.core.langgraph.skills.deep_research_proxy import (
-    shutdown as deep_research_proxy_shutdown,
-    warm_up as deep_research_proxy_warm_up,
-)
 from app.core.limiter import limiter
 from app.core.logging import logger
 from app.core.metrics import setup_metrics
 from app.core.middleware import (
     LoggingContextMiddleware,
-    MetricsMiddleware,
     ProfilingMiddleware,
 )
 from app.core.observability import langfuse_init
@@ -70,47 +57,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("cache_initialization_failed", error=str(e))
 
-    # Discover and register every skill before pre-warming the agent's graph,
-    # so LangGraphAgent._bind_skills sees the complete skill set on first call.
+    # Pre-warm the five agents' compiled graphs to avoid first-request cold start.
+    # The research agent additionally opens a PostgreSQL connection pool for its
+    # LangGraph checkpointer; the other four are stateless.
+    registry = AGENT_REGISTRY()
     try:
-        SkillRegistry.discover()
+        for name, agent in registry.items():
+            maybe_coro = agent.create_graph()
+            if hasattr(maybe_coro, "__await__"):
+                await maybe_coro  # type: ignore[func-returns-value]
+            logger.info("agent_graph_pre_warmed", agent=name)
     except Exception as e:
-        logger.exception("skill_discovery_failed", error=str(e))
-
-    # Pre-warm the LangGraph agent: create graph + connection pool at startup
-    # to avoid cold-start latency on the first request
-    try:
-        await agent.create_graph()
-        logger.info("graph_pre_warmed")
-    except Exception as e:
-        logger.exception("graph_pre_warm_failed", error=str(e))
-
-    # Pre-warm the deep research agent (its own checkpointer + connection pool)
-    try:
-        await research_agent.create_graph()
-        logger.info("research_graph_pre_warmed")
-    except Exception as e:
-        logger.exception("research_graph_pre_warm_failed", error=str(e))
-
-    # Pre-warm the A2A research specialist (its own deep research graph + pool)
-    try:
-        await warm_up_specialists()
-        logger.info("a2a_specialists_pre_warmed")
-    except Exception as e:
-        logger.exception("a2a_specialists_pre_warm_failed", error=str(e))
-
-    # Pre-warm the deep_research_proxy skill (its own DeepResearchAgent instance)
-    # so the first LLM-triggered "deep research" tool call doesn't pay cold-start.
-    try:
-        await deep_research_proxy_warm_up()
-    except Exception as e:
-        logger.exception("deep_research_proxy_pre_warm_failed", error=str(e))
-
-    # Open the data_query SQL pool (no-op when DATA_QUERY_READONLY_DSN is unset).
-    try:
-        await data_query_warm_up()
-    except Exception as e:
-        logger.exception("data_query_pre_warm_failed", error=str(e))
+        logger.exception("agent_graph_pre_warm_failed", error=str(e))
 
     # Initialize the coordinator's shared A2A client (httpx connection pool)
     try:
@@ -130,15 +88,15 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown
     await cache_service.close()
     await a2a_specialist_client.close()
-    await shutdown_specialists()
-    await deep_research_proxy_shutdown()
-    await data_query_shutdown()
-    if agent._connection_pool:
-        await agent._connection_pool.close()
-        logger.info("connection_pool_closed")
-    if research_agent._connection_pool:
-        await research_agent._connection_pool.close()
-        logger.info("research_connection_pool_closed")
+
+    # Close the research agent's PostgreSQL pool (only one with persistent state).
+    research_agent = registry.get("research")
+    if research_agent is not None:
+        pool = getattr(research_agent, "_connection_pool", None)
+        if pool is not None:
+            await pool.close()
+            logger.info("research_connection_pool_closed")
+
     logger.info("application_shutdown")
 
 
@@ -150,14 +108,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up Prometheus metrics
+# Set up Prometheus /metrics endpoint
 setup_metrics(app)
+
+# Add Prometheus HTTP metrics middleware (must be outermost to capture all requests)
+app.add_middleware(PrometheusMiddleware)
 
 # Add logging context middleware (must be added before other middleware to capture context)
 app.add_middleware(LoggingContextMiddleware)
-
-# Add custom metrics middleware
-app.add_middleware(MetricsMiddleware)
 
 # Add profiling middleware (DEBUG only — saves HTML to /tmp on slow requests)
 if settings.DEBUG:
@@ -215,8 +173,8 @@ app.add_middleware(
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Mount the A2A specialist servers (research / search / writer / coder) as
-# sub-applications. The /agents coordinator endpoint reaches them as an A2A client.
+# Mount the four specialist A2A servers (research / search / writer / coder) as
+# sub-applications. The coordinator agent reaches them as an A2A client.
 mount_a2a_servers(app)
 
 

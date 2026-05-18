@@ -65,39 +65,16 @@ curl -X POST http://localhost:8000/api/v1/auth/session \
 
 返回 `session_id` 和会话作用域的 JWT。
 
-### 3. 聊天
+### 3. 多智能体聊天
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/chatbot/chat \
+curl -X POST http://localhost:8000/api/v1/chat \
   -H "Authorization: Bearer <会话令牌>" \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "你好！"}]}'
-```
-
-或使用流式端点获取实时响应：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chatbot/chat/stream \
-  -H "Authorization: Bearer <会话令牌>" \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "你好！"}]}'
-```
-
-### 4. 深度研究
-
-```bash
-curl -X POST http://localhost:8000/api/v1/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "量子计算的最新进展"}'
-```
-
-### 5. 多智能体协调
-
-```bash
-curl -X POST http://localhost:8000/api/v1/agents/chat \
   -H "Content-Type: application/json" \
   -d '{"query": "帮我研究一下 Rust 在嵌入式系统中的应用，并写一份总结"}'
 ```
+
+返回 `MultiAgentResponse`：包含 `answer`（最终合成回答）、`routing_reasoning`（路由理由）和 `delegations`（每个专家的执行结果）。
 
 ## 自定义智能体
 
@@ -105,11 +82,13 @@ curl -X POST http://localhost:8000/api/v1/agents/chat \
 
 | 内容 | 位置 |
 |---|---|
-| 智能体人格与指令 | `app/core/prompts/system.md` |
-| 可用工具 | `app/core/langgraph/tools/__init__.py`（主智能体工具列表） |
+| Coordinator 路由逻辑 | `app/agents/coordinator/agent.py` |
+| Coordinator 路由提示词 | `app/agents/coordinator/prompts/router.md` |
+| Coordinator 汇总提示词 | `app/agents/coordinator/prompts/synthesis.md` |
+| 各专家提示词 | `app/agents/<name>/prompts/system.md` |
 | LLM 模型与降级顺序 | `app/services/llm/registry.py` → `LLMRegistry.LLMS` |
 | 记忆集合名称 | `.env` 中的 `LONG_TERM_MEMORY_COLLECTION_NAME` |
-| 系统提示词模板 | `app/core/prompts/` 目录下的 `.md` 文件 |
+| 专家 AgentCard | `app/agents/<name>/card.py` |
 
 ## 运行 pre-commit hooks
 

@@ -69,16 +69,22 @@ migrate-history:
 # Evaluation
 # ---------------------------------------------------------------------------
 eval:
-	@$(call run_with_env,python -m evals.main --interactive)
+	@$(call run_with_env,uv run python -m evals.main trace)
 
 eval-quick:
-	@$(call run_with_env,python -m evals.main --quick)
-
-eval-no-report:
-	@$(call run_with_env,python -m evals.main --no-report)
+	@$(call run_with_env,uv run python -m evals.main trace --no-report)
 
 eval-routing:
-	@$(call run_with_env,uv run python -m evals.skill_routing.runner)
+	@$(call run_with_env,uv run python -m evals.main routing)
+
+eval-quality:
+	@if [ -z "$(AGENT)" ]; then \
+		echo "Usage: make eval-quality AGENT=research|search|writer|coder"; exit 1; \
+	fi
+	@$(call run_with_env,uv run python -m evals.main agent $(AGENT))
+
+eval-all:
+	@$(call run_with_env,uv run python -m evals.main all)
 
 # ---------------------------------------------------------------------------
 # Code quality
@@ -162,9 +168,11 @@ help:
 	@echo "  migrate-history      Show migration history"
 	@echo ""
 	@echo "Evaluation:"
-	@echo "  eval                 Run evals (interactive)"
-	@echo "  eval-quick           Run evals (default settings)"
-	@echo "  eval-no-report       Run evals without report"
+	@echo "  eval                 Trace post-hoc eval (Langfuse traffic)"
+	@echo "  eval-quick           Trace eval, skip JSON report"
+	@echo "  eval-routing         Coordinator routing accuracy (offline)"
+	@echo "  eval-quality AGENT=x Per-specialist quality (x=research|search|writer|coder)"
+	@echo "  eval-all             Run every eval in sequence"
 	@echo ""
 	@echo "Code quality:"
 	@echo "  lint                 Ruff lint check"
@@ -190,7 +198,7 @@ help:
 
 .PHONY: install dev staging prod _serve \
         migrate migration migrate-downgrade migrate-history \
-        eval eval-quick eval-no-report \
+        eval eval-quick eval-routing eval-quality eval-all \
         lint format typecheck check pre-commit pre-commit-update \
         docker-build docker-up docker-down docker-logs \
         stack-up stack-down stack-logs \

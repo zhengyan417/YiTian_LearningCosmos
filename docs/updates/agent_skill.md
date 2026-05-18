@@ -1,4 +1,6 @@
-# Skill 抽象层设计文档
+# Skill 抽象层设计文档（已归档）
+
+> **注意：Skill 系统已在架构重构中移除（2026-05）。** 本文档保留仅供历史参考。当前架构采用五大独立 Agent（coordinator / research / search / writer / coder），通过 A2A 协议协作。详见 [architecture.md](../architecture.md)。
 
 > **目标**：在不破坏现有 LangGraph + tool calling 范式的前提下，给主 agent 增加一层"能力封装"（skill），让 agent 知道"何时该用什么"，并把现有 deep_research / A2A 这些独立子系统也接入到主对话链路里。
 

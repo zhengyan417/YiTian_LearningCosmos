@@ -20,7 +20,7 @@ from a2a.types import (
 )
 from a2a.utils import new_task
 
-from app.core.a2a.specialists import SpecialistRunner
+from app.agents.base import AgentRunner
 from app.core.logging import logger
 
 
@@ -31,7 +31,7 @@ class SpecialistAgentExecutor(AgentExecutor):
     uniform coroutine — all domain logic lives in the runner.
     """
 
-    def __init__(self, name: str, runner: SpecialistRunner) -> None:
+    def __init__(self, name: str, runner: AgentRunner) -> None:
         """Initialize the executor for one specialist.
 
         Args:

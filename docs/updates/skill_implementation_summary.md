@@ -1,4 +1,6 @@
-# Skill 抽象层落地总结（P1 - P5）
+# Skill 抽象层落地总结（已归档）
+
+> **注意：Skill 系统已在架构重构中移除（2026-05）。** 本文档保留仅供历史参考。当前架构详见 [architecture.md](../architecture.md)。
 
 > 与 [agent_skill.md](./agent_skill.md) 设计文档配对：本文档记录**实际落地的内容**、与设计的**偏差**，以及后续可继续打磨的点。
 > 落地范围：6 个 skill、配套监控指标、tier 化、路由 eval。所有阶段全部通过 `ruff check` + `pyright` + smoke。

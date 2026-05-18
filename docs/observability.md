@@ -85,13 +85,12 @@ logger.error("something failed", error=str(e))           # 异常请用 logger.e
 
 | 指标 | 类型 | 说明 |
 | --- | --- | --- |
-| `http_requests_total` | Counter | 按 method、endpoint、status 统计的请求数 |
-| `http_request_duration_seconds` | Histogram | 按 method、endpoint 统计的请求延迟 |
+| `starlette_requests` | Counter | 按 method、path_template 统计的请求总数 |
+| `starlette_responses` | Counter | 按 method、path_template、status_code 统计的响应数 |
+| `starlette_requests_in_progress` | Gauge | 正在处理的请求数 |
+| `starlette_requests_processing_time_seconds` | Histogram | 按 method、path_template 统计的请求处理延迟 |
+| `starlette_exceptions` | Counter | 按 method、path_template、exception_type 统计的异常数 |
 | `llm_inference_duration_seconds` | Histogram | 按模型统计的 LLM 调用延迟 |
-| `llm_stream_duration_seconds` | Histogram | 按模型统计的流式调用延迟 |
-| `db_connections` | Gauge | 活跃数据库连接数 |
-| `orders_processed_total` | Counter | 业务指标示例 |
-| `session_names_generated_total` | Counter | 按状态（success/error）统计的会话标题生成次数 |
 
 Grafana 仪表盘预配置在 `grafana/` 中。运行 `make stack-up ENV=development` 启动完整技术栈后，访问 [http://localhost:3000](http://localhost:3000)（admin/admin）。
 
@@ -106,7 +105,7 @@ Grafana 仪表盘预配置在 `grafana/` 中。运行 `make stack-up ENV=develop
 ```json
 {
   "request_id": "...",
-  "endpoint": "POST /api/v1/chatbot/chat",
+  "endpoint": "POST /api/v1/chat",
   "wall_time_ms": 1842,
   "cpu_time_ms": 145,
   "io_wait_ms": 1697,

@@ -54,7 +54,7 @@ flowchart TD
 - 等待策略：指数退避，最小 2s，最大 10s
 - 重试范围：`RateLimitError`、`APITimeoutError`、`APIError`
 
-**总超时**：`LLM_TOTAL_TIMEOUT` 秒（默认：60s）为整个循环设上限。没有这个限制，最坏情况是 `重试次数 × 模型数 × 最大等待` — 可能超过 2 分钟。
+**总超时**：`LLM_TOTAL_TIMEOUT` 秒（默认：180s）为整个循环设上限。没有这个限制，最坏情况是 `重试次数 × 模型数 × 最大等待` — 可能超过 2 分钟。
 
 **降级顺序**：在 `LLMRegistry.LLMS` 中循环。用完最后一个模型后绕回第一个，完成一个完整循环后停止。
 
@@ -104,7 +104,7 @@ result: MySchema = await llm_service.call(
 
 ## 两种调用路径
 
-`LLMService` 提供两种调用路径：
+`LLMService.call()` 根据参数自动选择路径：
 
-- **默认路径**（`call()`）：使用绑定了工具的共享 LLM 实例，适合有状态的智能体对话
-- **一次性路径**（`call_one_off()`）：每次创建新的本地实例，不影响当前默认模型的状态。适合会话命名等独立任务，需要不同的 `response_format` 或 temperature
+- **默认路径**（不传 `model_name` / `response_format` / `model_kwargs`）：使用绑定了工具的共享 `self._llm` 实例，降级时自动重新绑定工具。适合有状态的 Agent 对话。
+- **一次性路径**（传入任意 override 参数）：每次创建新的本地实例，不影响当前默认模型的状态。适合需要不同 `response_format` 或 temperature 的独立任务。

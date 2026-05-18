@@ -191,6 +191,21 @@ class LLMService:
         try:
             response = await llm.ainvoke(messages)
             logger.debug("llm_call_successful")
+            content = getattr(response, "content", None)
+            if not content:
+                finish_reason = "unknown"
+                token_usage = {}
+                try:
+                    meta = getattr(response, "response_metadata", {}) or {}
+                    finish_reason = meta.get("finish_reason", "unknown")
+                    token_usage = meta.get("token_usage", {})
+                except Exception:
+                    pass
+                logger.warning(
+                    "llm_returned_empty_content",
+                    finish_reason=finish_reason,
+                    token_usage=token_usage,
+                )
             return response
         except (RateLimitError, APITimeoutError, APIError) as e:
             logger.warning(

@@ -213,6 +213,14 @@ def setup_logging() -> None:
         include_file_info=settings.ENVIRONMENT in [Environment.DEVELOPMENT, Environment.TEST]
     )
 
+    # Silence noisy a2a-sdk internal debug logs: event-queue polling uses
+    # CancelledError for flow control and the telemetry tracer records every
+    # cancellation as a span — together they produce ~2 spam lines per second
+    # across 4 agent servers when DEBUG is enabled.
+    logging.getLogger("a2a.utils.telemetry").setLevel(logging.WARNING)
+    logging.getLogger("a2a.server.events.event_queue").setLevel(logging.WARNING)
+    logging.getLogger("a2a.server.events.event_consumer").setLevel(logging.WARNING)
+
     # Configure standard logging
     logging.basicConfig(
         format="%(message)s",

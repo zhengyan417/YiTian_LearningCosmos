@@ -23,9 +23,25 @@ from a2a.utils import (
     get_message_text,
 )
 
-from app.core.a2a.cards import agent_base_url
 from app.core.config import settings
 from app.core.logging import logger
+
+
+def agent_base_url(name: str) -> str:
+    """Return the externally reachable base URL of a specialist's A2A server.
+
+    Inlined here (rather than imported) so the client stays decoupled from any
+    individual agent package — it speaks only the A2A protocol.
+
+    Args:
+        name: The specialist name (research / search / writer / coder).
+
+    Returns:
+        The base URL, e.g. ``http://localhost:8000/a2a/research``.
+    """
+    base = settings.A2A_BASE_URL.rstrip("/")
+    prefix = settings.A2A_MOUNT_PREFIX.strip("/")
+    return f"{base}/{prefix}/{name}"
 
 
 def _extract_task_text(task: Task) -> str:
