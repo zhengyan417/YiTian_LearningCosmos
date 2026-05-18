@@ -5,16 +5,28 @@ to score one ``(input, output)`` pair against a metric prompt. The judge uses
 the dedicated ``settings.EVALUATION_*`` endpoint so it stays decoupled from the
 production LLM service: no shared rate limit, no circular fallback, no tool
 bindings leaking in.
+
+We use ``chat.completions.create`` with ``response_format={"type": "json_object"}``
+and parse the result manually rather than the OpenAI SDK's ``.parse()`` sugar.
+DeepSeek (the default evaluation provider) rejects the strict ``json_schema``
+response format the SDK emits, so we mirror the production coordinator's
+approach instead.
 """
 
 import asyncio
-from typing import Optional
+import json
+from typing import (
+    Any,
+    Optional,
+)
 
 import openai
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.utils import extract_json
 from evals.config import (
     JUDGE_MAX_RETRIES,
     JUDGE_RETRY_SLEEP_SECONDS,
@@ -33,6 +45,30 @@ def _client_singleton() -> AsyncOpenAI:
             base_url=settings.EVALUATION_BASE_URL,
         )
     return _client
+
+
+_JUDGE_INSTRUCTION = (
+    "Reply with ONLY a JSON object — no prose, no markdown — with this shape:\n"
+    '{"score": <float between 0 and 1>, "reasoning": "<one sentence>"}'
+)
+
+
+def _parse_score(raw: str) -> Optional[ScoreSchema]:
+    """Parse the judge LLM's reply into a ``ScoreSchema``, tolerating fenced code blocks."""
+    if not raw or not raw.strip():
+        logger.warning("judge_response_empty")
+        return None
+    text = extract_json(raw)
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("judge_response_json_parse_failed", raw=raw[:200])
+        return None
+    try:
+        return ScoreSchema.model_validate(data)
+    except ValidationError as e:
+        logger.warning("judge_response_schema_invalid", error=str(e), raw=raw[:200])
+        return None
 
 
 async def call_judge(
@@ -62,18 +98,25 @@ async def call_judge(
         return None
 
     client = _client_singleton()
+    user_message = f"Input: {input_text}\nGeneration: {output_text}\n\n{_JUDGE_INSTRUCTION}"
+
     last_error: Optional[Exception] = None
     for attempt in range(1, JUDGE_MAX_RETRIES + 1):
         try:
-            response = await client.beta.chat.completions.parse(
+            response = await client.chat.completions.create(
                 model=settings.EVALUATION_LLM,
                 messages=[
                     {"role": "system", "content": metric_prompt},
-                    {"role": "user", "content": f"Input: {input_text}\nGeneration: {output_text}"},
+                    {"role": "user", "content": user_message},
                 ],
-                response_format=ScoreSchema,
+                response_format={"type": "json_object"},
             )
-            return response.choices[0].message.parsed
+            raw = response.choices[0].message.content or ""
+            parsed = _parse_score(raw)
+            if parsed is not None:
+                return parsed
+            # Parser failed — treat as a soft error so we still retry once or twice.
+            last_error = ValueError(f"judge response not parseable as ScoreSchema: {raw[:200]}")
         except (openai.APIError, openai.OpenAIError) as e:
             last_error = e
             logger.warning(
@@ -82,8 +125,9 @@ async def call_judge(
                 max_attempts=JUDGE_MAX_RETRIES,
                 error=str(e),
             )
-            if attempt < JUDGE_MAX_RETRIES:
-                await asyncio.sleep(JUDGE_RETRY_SLEEP_SECONDS)
+
+        if attempt < JUDGE_MAX_RETRIES:
+            await asyncio.sleep(JUDGE_RETRY_SLEEP_SECONDS)
 
     logger.error("judge_call_exhausted_retries", error=str(last_error) if last_error else "unknown")
     return None
