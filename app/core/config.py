@@ -162,6 +162,18 @@ class Settings:
         self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
         self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
 
+        # Coder Agent Configuration (LangGraph: code → review → END)
+        # When CODER_REFLECTION_ENABLED is true the coder runs a single critic
+        # pass after the initial draft and rewrites the answer once if the
+        # critic flags issues. Single pass only — no loop — so the worst case
+        # is exactly two LLM calls per request.
+        self.CODER_REFLECTION_ENABLED = os.getenv("CODER_REFLECTION_ENABLED", "true").lower() in (
+            "true",
+            "1",
+            "t",
+            "yes",
+        )
+
         # A2A (Agent-to-Agent) Multi-Agent Configuration
         # The coordinator is an A2A client; research/search/writer/coder are A2A servers
         # mounted under A2A_MOUNT_PREFIX. A2A_BASE_URL must be the externally reachable

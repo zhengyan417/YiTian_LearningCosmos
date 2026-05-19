@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "getting-started.md",
+                "file": "llm-service.md",
                 "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "getting-started"
+              "title": "llm-service"
             }
           }
         ]
@@ -183,12 +183,13 @@
       "bases:新建数据库": false
     }
   },
-  "active": "b647855fb63b868c",
+  "active": "ac600b913e57acf2",
   "lastOpenFiles": [
+    "evaluation.md",
+    "getting-started.md",
     "observability.md.tmp.42600.a89083e7b62d",
     "observability.md.tmp.42600.4ba7d4d03b7c",
     "tests.md",
-    "getting-started.md",
     "llm-service.md",
     "memory.md",
     "observability.md",
