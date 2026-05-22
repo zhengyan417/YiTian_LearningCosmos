@@ -161,6 +161,10 @@ class Settings:
         self.RESEARCH_MAX_SEARCHES_PER_SUBAGENT = int(os.getenv("RESEARCH_MAX_SEARCHES_PER_SUBAGENT", "5"))
         self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
         self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
+        # Per-page character cap on fetched webpage markdown. A sub-agent
+        # concatenates every search result it accumulates, so without this cap
+        # a few large pages can blow past the LLM context window.
+        self.RESEARCH_WEBPAGE_MAX_CHARS = int(os.getenv("RESEARCH_WEBPAGE_MAX_CHARS", "8000"))
 
         # Research iteration knobs. The two-layer ReAct loop is always on; these
         # only bound how far it can iterate:
@@ -193,6 +197,14 @@ class Settings:
         self.A2A_MOUNT_PREFIX = os.getenv("A2A_MOUNT_PREFIX", "/a2a")
         self.A2A_COORDINATOR_MAX_PARALLEL = int(os.getenv("A2A_COORDINATOR_MAX_PARALLEL", "3"))
         self.A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "300.0"))
+
+        # Coordinator reflection loop (LangGraph: route → dispatch ⇄ reflect → synthesize).
+        # After dispatching specialists the coordinator runs a reflect node that
+        # reviews the results and may dispatch another round. Set
+        # COORDINATOR_MAX_REFLECTION_ROUNDS to 0 to disable the loop entirely
+        # (reflect then routes straight to synthesize).
+        self.COORDINATOR_MAX_REFLECTION_ROUNDS = int(os.getenv("COORDINATOR_MAX_REFLECTION_ROUNDS", "1"))
+        self.COORDINATOR_MAX_TOTAL_DELEGATIONS = int(os.getenv("COORDINATOR_MAX_TOTAL_DELEGATIONS", "6"))
 
         # DashScope API Key (used by mem0ai embedder with text-embedding-v4)
         self.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")

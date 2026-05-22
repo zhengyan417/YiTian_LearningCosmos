@@ -145,6 +145,33 @@ class JsonlFileHandler(logging.Handler):
         super().close()
 
 
+class HealthAndMetricsAccessFilter(logging.Filter):
+    """Drop uvicorn access-log lines for high-frequency polling endpoints.
+
+    Prometheus scrapes ``/metrics`` and the Docker healthcheck hits ``/health``
+    every few seconds; logging each request floods the console with noise.
+    Access logs for real application traffic are left untouched.
+    """
+
+    _SILENCED_PATHS = ("/metrics", "/health")
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return False when the access record is for a polling endpoint.
+
+        Args:
+            record: A uvicorn access log record whose ``args`` tuple is
+                ``(client_addr, method, path, http_version, status)``.
+
+        Returns:
+            bool: False to drop the record, True to keep it.
+        """
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            return not args[2].startswith(self._SILENCED_PATHS)
+        return True
+
+
 def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
     """Get the structlog processors based on configuration.
 
@@ -220,6 +247,20 @@ def setup_logging() -> None:
     logging.getLogger("a2a.utils.telemetry").setLevel(logging.WARNING)
     logging.getLogger("a2a.server.events.event_queue").setLevel(logging.WARNING)
     logging.getLogger("a2a.server.events.event_consumer").setLevel(logging.WARNING)
+
+    # Silence noisy HTTP / LLM-client loggers. With DEBUG enabled the root
+    # logger runs at DEBUG, so these libraries dump their internals straight to
+    # the console — outside structlog — and bury our own structured logs:
+    #   - openai   → full request payloads ("Request options: {...}", "Sending HTTP Request")
+    #   - httpx    → one INFO line per outbound call ("HTTP Request: ... 200 OK")
+    #   - httpcore → per-frame connection trace ("send_request_headers.started", ...)
+    # WARNING keeps genuine errors from these libraries visible.
+    for noisy_logger in ("openai", "httpx", "httpcore"):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
+    # Keep real uvicorn access logs, but drop the constant /metrics (Prometheus)
+    # and /health (Docker healthcheck) polling that otherwise floods the console.
+    logging.getLogger("uvicorn.access").addFilter(HealthAndMetricsAccessFilter())
 
     # Configure standard logging
     logging.basicConfig(

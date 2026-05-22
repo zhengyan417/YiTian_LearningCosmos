@@ -58,6 +58,7 @@ cp .env.example .env.development
 | `RESEARCH_MAX_SEARCHES_PER_SUBAGENT` | `5` | 每个子智能体最大搜索次数 |
 | `RESEARCH_TAVILY_MAX_RESULTS` | `3` | Tavily 单次搜索最大返回条数 |
 | `RESEARCH_WEBPAGE_FETCH_TIMEOUT` | `10.0` | 抓取网页内容的超时秒数 |
+| `RESEARCH_WEBPAGE_MAX_CHARS` | `8000` | 单个网页转 markdown 后的字符上限，超出则截断 |
 | `RESEARCH_MAX_REFLECTION_ROUNDS` | `3` | 子研究员 search→reflect 循环最大轮数 |
 | `RESEARCH_MAX_SUPERVISOR_ROUNDS` | `2` | 首轮派发后最多再补的研究轮数 |
 | `RESEARCH_MAX_TOTAL_SUBAGENTS` | `6` | 单次研究累计子研究员运行数硬上限 |
@@ -73,6 +74,8 @@ cp .env.example .env.development
 | `A2A_MOUNT_PREFIX` | `/a2a` | A2A 服务器挂载前缀 |
 | `A2A_COORDINATOR_MAX_PARALLEL` | `2` | 协调者并行委派的最大数量 |
 | `A2A_CLIENT_TIMEOUT` | `300.0` | A2A 客户端调用超时秒数 |
+| `COORDINATOR_MAX_REFLECTION_ROUNDS` | `1` | 派发后协调者反思补派的最大轮数（`0` 关闭反思循环） |
+| `COORDINATOR_MAX_TOTAL_DELEGATIONS` | `6` | 单次请求累计委派数硬上限 |
 
 ---
 

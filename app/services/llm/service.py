@@ -17,6 +17,7 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
 from openai import (
     APIError,
+    APIStatusError,
     APITimeoutError,
     OpenAIError,
     RateLimitError,
@@ -25,7 +26,7 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -35,6 +36,19 @@ from app.core.logging import logger
 from app.services.llm.registry import LLMRegistry
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _is_retryable_llm_error(exc: BaseException) -> bool:
+    """Return True for transient LLM failures that are worth retrying.
+
+    Connection errors, timeouts and other non-status API errors are transient.
+    For HTTP status errors only 429 (rate limit) and 5xx (server) are retried —
+    a deterministic 4xx such as 400 (bad request / context-length exceeded)
+    fails identically on every attempt and would only burn the timeout budget.
+    """
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return isinstance(exc, APIError)
 
 
 class LLMService:
@@ -171,7 +185,7 @@ class LLMService:
     @retry(
         stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
+        retry=retry_if_exception(_is_retryable_llm_error),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -208,12 +222,19 @@ class LLMService:
                 )
             return response
         except (RateLimitError, APITimeoutError, APIError) as e:
-            logger.warning(
-                "llm_call_failed_retrying",
-                error_type=type(e).__name__,
-                error=str(e),
-                exc_info=True,
-            )
+            if _is_retryable_llm_error(e):
+                logger.warning(
+                    "llm_call_failed_retrying",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                    exc_info=True,
+                )
+            else:
+                logger.error(
+                    "llm_call_failed_not_retryable",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
             raise
         except OpenAIError as e:
             logger.error(
@@ -341,6 +362,13 @@ class LLMService:
                     total_models=total,
                     error=str(e),
                 )
+                if isinstance(e, APIStatusError) and not _is_retryable_llm_error(e):
+                    logger.error(
+                        "llm_call_not_retryable_skipping_fallback",
+                        model=current_name,
+                        error_type=type(e).__name__,
+                    )
+                    break
                 if models_tried >= total:
                     logger.error(
                         "all_models_failed", models_tried=models_tried, starting_model=LLMRegistry.LLMS[start]["name"]

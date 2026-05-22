@@ -1,8 +1,14 @@
-"""Coordinator agent — routes work to A2A specialists, then synthesizes.
+"""Coordinator agent — routes work to A2A specialists, reflects, then synthesizes.
 
-LangGraph shape: ``route -> dispatch -> synthesize -> END``. When the route
-node produces a ``direct_answer`` (no specialist needed), dispatch and
-synthesize are skipped and the graph goes straight to END.
+LangGraph shape: ``route → dispatch ⇄ reflect → synthesize → END``. The reflect
+node reviews the specialist results and either dispatches another round (loop
+back to ``dispatch``) or finishes (``synthesize``). When the route node produces
+a ``direct_answer`` (no specialist needed), dispatch, reflect and synthesize are
+all skipped and the graph goes straight to END.
+
+The reflection loop is bounded by ``COORDINATOR_MAX_REFLECTION_ROUNDS`` and
+``COORDINATOR_MAX_TOTAL_DELEGATIONS``; every guard and failure mode in reflect
+routes to ``synthesize``, so a bad LLM response can only end the loop.
 
 The coordinator is the A2A *client*; it never gets mounted as an A2A server.
 It speaks to the four specialists through ``a2a_specialist_client`` so the
@@ -26,6 +32,7 @@ from langgraph.graph.state import (
     Command,
     CompiledStateGraph,
 )
+from pydantic import ValidationError
 
 from app.agents.base import (
     load_prompt,
@@ -40,6 +47,7 @@ from app.schemas.multi_agent import (
     AgentResult,
     Delegation,
     MultiAgentResponse,
+    ReflectionDecision,
     RoutingDecision,
 )
 from app.services.llm import llm_service
@@ -81,6 +89,11 @@ def _synthesis_prompt(query: str, findings: str, failure_summary: str) -> str:
     )
 
 
+def _reflect_prompt() -> str:
+    """Load the coordinator reflection prompt with the current date inlined."""
+    return load_prompt(__file__, "reflect.md").format(current_date_and_time=now_str())
+
+
 def _is_failed_output(output: str) -> bool:
     """Return True if the specialist output reads as a failure."""
     if not output:
@@ -94,8 +107,26 @@ def _agent_label(agent: str) -> str:
     return _AGENT_LABELS.get(agent, agent.replace("_", " ").title())
 
 
+def _dedupe_results(results: list[AgentResult]) -> list[AgentResult]:
+    """Keep the last result for each ``(agent, task)`` pair, preserving order.
+
+    The reflect loop may re-delegate a failed ``(agent, task)``; when it does,
+    the retry's result supersedes the earlier failed one so the user sees a
+    single section per delegation rather than the failure plus its retry.
+    """
+    by_key: dict[tuple[str, str], AgentResult] = {}
+    for result in results:
+        by_key[(result.agent, result.task)] = result
+    return list(by_key.values())
+
+
+def _format_results(results: list[AgentResult]) -> str:
+    """Render specialist results as markdown sections keyed by agent and task."""
+    return "\n\n---\n\n".join(f"### {r.agent} agent\nTask: {r.task}\n\n{r.output}" for r in results)
+
+
 class CoordinatorAgent:
-    """Three-node LangGraph: ``route -> dispatch -> synthesize -> END``."""
+    """Four-node LangGraph: ``route → dispatch ⇄ reflect → synthesize → END``."""
 
     def __init__(self) -> None:
         """Initialize the coordinator with deferred graph compilation."""
@@ -176,12 +207,72 @@ class CoordinatorAgent:
 
         results = list(await asyncio.gather(*[_run_one(d) for d in state.delegations]))
         logger.info("coordinator_dispatch_complete", result_count=len(results))
-        return Command(update={"results": results}, goto="synthesize")
+        return Command(update={"results": results}, goto="reflect")
+
+    async def _reflect(self, state: CoordinatorState) -> Command:
+        """Review the specialist results; finish or dispatch another round.
+
+        Routes to ``synthesize`` (results are sufficient) or back to ``dispatch``
+        (a specialist failed or a concrete gap remains). Every guard and every
+        failure mode routes to synthesize, so a bad LLM response can only end
+        the loop — it can never extend it.
+        """
+        rounds_done = state.reflection_rounds
+
+        # Hard guards — these end the loop regardless of what the LLM might say.
+        if rounds_done >= settings.COORDINATOR_MAX_REFLECTION_ROUNDS:
+            logger.info("coordinator_reflect_stop_round_cap", rounds=rounds_done)
+            return Command(goto="synthesize")
+        if len(state.results) >= settings.COORDINATOR_MAX_TOTAL_DELEGATIONS:
+            logger.info("coordinator_reflect_stop_delegation_cap", delegations=len(state.results))
+            return Command(goto="synthesize")
+
+        results = _dedupe_results(state.results)
+        reflect_input = (
+            f"## Original user request\n\n{state.query}\n\n"
+            f"## Follow-up rounds run so far: {rounds_done} "
+            f"(hard cap {settings.COORDINATOR_MAX_REFLECTION_ROUNDS})\n\n"
+            f"## Delegations completed so far\n\n{_format_results(results)}\n\n"
+            f"{self._build_failure_summary(results)}\n\n"
+            "Assess the results and reply with the required JSON."
+        )
+
+        try:
+            with llm_inference_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL).time():
+                response = await llm_service.call(
+                    [SystemMessage(content=_reflect_prompt()), HumanMessage(content=reflect_input)],
+                    model_name=settings.DEFAULT_LLM_MODEL,
+                    model_kwargs={"response_format": {"type": "json_object"}},
+                )
+            decision = self._parse_reflection_json(str(response.content) if response.content else "")
+        except Exception as e:
+            logger.warning("coordinator_reflect_failed_stopping", error=str(e))
+            return Command(goto="synthesize")
+
+        note = decision.reasoning or f"reflection round {rounds_done + 1}: {decision.decision}"
+        # Trim the new batch to the cumulative delegation cap.
+        room = max(settings.COORDINATOR_MAX_TOTAL_DELEGATIONS - len(state.results), 0)
+        new_delegations = decision.new_delegations[:room]
+
+        if decision.decision == "continue" and new_delegations:
+            logger.info("coordinator_reflect_continue", round=rounds_done + 1, new_delegations=len(new_delegations))
+            return Command(
+                update={
+                    "delegations": new_delegations,
+                    "reflection_notes": [note],
+                    "reflection_rounds": rounds_done + 1,
+                },
+                goto="dispatch",
+            )
+
+        logger.info("coordinator_reflect_complete", round=rounds_done + 1, parsed_decision=decision.decision)
+        return Command(update={"reflection_notes": [note]}, goto="synthesize")
 
     async def _synthesize(self, state: CoordinatorState) -> Command:
         """Produce the final answer: brief LLM intro + verbatim specialist outputs."""
-        findings = "\n\n---\n\n".join(f"### {r.agent} agent\nTask: {r.task}\n\n{r.output}" for r in state.results)
-        failure_summary = self._build_failure_summary(state.results)
+        results = _dedupe_results(state.results)
+        findings = _format_results(results)
+        failure_summary = self._build_failure_summary(results)
         prompt = _synthesis_prompt(query=state.query, findings=findings, failure_summary=failure_summary)
 
         intro = ""
@@ -198,7 +289,7 @@ class CoordinatorAgent:
         if not intro:
             logger.warning("coordinator_synthesis_empty_intro_using_default", findings_chars=len(findings))
 
-        answer = self._assemble_structured_response(state.results, intro)
+        answer = self._assemble_structured_response(results, intro)
         return Command(update={"answer": answer}, goto=END)
 
     # ------------------------------------------------------------------
@@ -220,6 +311,33 @@ class CoordinatorAgent:
         data.setdefault("direct_answer", None)
         data.setdefault("delegations", [])
         return RoutingDecision.model_validate(data)
+
+    def _parse_reflection_json(self, raw: str) -> ReflectionDecision:
+        """Best-effort parse of the reflect node's JSON response.
+
+        Falls back to a ``complete`` decision when parsing fails so a malformed
+        response can only ever end the loop, never extend it. Delegations with
+        an unknown agent name or a missing task are dropped.
+        """
+        text = extract_json(raw)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("coordinator_reflect_json_parse_failed", raw=raw[:200])
+            return ReflectionDecision()
+
+        new_delegations: list[Delegation] = []
+        for item in data.get("new_delegations", []) or []:
+            try:
+                new_delegations.append(Delegation.model_validate(item))
+            except ValidationError:
+                logger.warning("coordinator_reflect_dropped_invalid_delegation", item=str(item)[:200])
+
+        return ReflectionDecision(
+            decision=str(data.get("decision", "complete") or "complete"),
+            reasoning=str(data.get("reasoning", "") or ""),
+            new_delegations=new_delegations,
+        )
 
     def _build_failure_summary(self, results: list[AgentResult]) -> str:
         """Build a markdown summary of which specialists succeeded and failed.
@@ -302,11 +420,15 @@ class CoordinatorAgent:
             return self._graph
         builder = StateGraph(CoordinatorState)
         builder.add_node("route", self._route, destinations=("dispatch", END))
-        builder.add_node("dispatch", self._dispatch, destinations=("synthesize",))
+        builder.add_node("dispatch", self._dispatch, destinations=("reflect",))
+        builder.add_node("reflect", self._reflect, destinations=("dispatch", "synthesize"))
         builder.add_node("synthesize", self._synthesize, destinations=(END,))
         builder.set_entry_point("route")
         self._graph = builder.compile(name="Coordinator Agent")
-        logger.info("coordinator_agent_graph_compiled")
+        logger.info(
+            "coordinator_agent_graph_compiled",
+            max_reflection_rounds=settings.COORDINATOR_MAX_REFLECTION_ROUNDS,
+        )
         return self._graph
 
     async def run_full(self, task: str, context_id: str) -> MultiAgentResponse:
@@ -322,7 +444,7 @@ class CoordinatorAgent:
         return MultiAgentResponse(
             answer=str(final_state.get("answer", "")),
             routing_reasoning=str(final_state.get("routing_reasoning", "")),
-            delegations=final_state.get("results", []),
+            delegations=_dedupe_results(final_state.get("results", [])),
         )
 
     async def run(self, task: str, context_id: str) -> str:

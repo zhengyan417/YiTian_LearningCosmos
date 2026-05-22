@@ -76,6 +76,29 @@ class RoutingDecision(BaseModel):
     )
 
 
+class ReflectionDecision(BaseModel):
+    """Structured output schema for the coordinator's reflection LLM call.
+
+    Parsed from the reflect node's JSON response. Every field has a default so
+    a malformed response degrades to ``complete`` — a bad reflection can only
+    end the dispatch loop, never extend it.
+
+    Attributes:
+        decision: ``"complete"`` to synthesize the answer now, ``"continue"`` to
+            dispatch another round of delegations.
+        reasoning: Short explanation of the reflection decision.
+        new_delegations: Delegations to run in the next round; used only when
+            ``decision`` is ``"continue"``.
+    """
+
+    decision: str = Field(default="complete", description="'complete' to finish, 'continue' for another round")
+    reasoning: str = Field(default="", description="Brief explanation of the reflection decision")
+    new_delegations: list[Delegation] = Field(
+        default_factory=list,
+        description="Delegations for the next round; used only when decision is 'continue'",
+    )
+
+
 class AgentResult(BaseModel):
     """The outcome of one specialist delegation.
 

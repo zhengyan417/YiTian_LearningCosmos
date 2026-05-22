@@ -212,13 +212,8 @@ def _summarize(report: EvalReport, agent_name: str) -> dict[str, Any]:
 
 async def run(agent_name: str, concurrency: int = 2, limit: Optional[int] = None) -> EvalReport:
     """Run the quality eval for one specialist agent."""
-    if agent_name not in AGENT_METRICS:
-        raise ValueError(f"unknown agent: {agent_name}. available: {sorted(AGENT_METRICS)}")
-
     start = time.time()
     agents = AGENT_REGISTRY()
-    if agent_name not in agents:
-        raise ValueError(f"agent not in registry: {agent_name}. available: {sorted(agents)}")
     agent = agents[agent_name]
 
     cases = _load_golden(agent_name)

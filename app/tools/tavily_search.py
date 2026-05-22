@@ -33,7 +33,12 @@ def _get_client() -> TavilyClient:
 
 
 async def _fetch_webpage_content(url: str) -> str:
-    """Fetch a URL and convert the HTML body to markdown."""
+    """Fetch a URL and convert the HTML body to markdown.
+
+    The markdown is capped at ``RESEARCH_WEBPAGE_MAX_CHARS`` so a few large
+    pages cannot blow past the LLM context window once a sub-agent concatenates
+    all of its accumulated search results.
+    """
     try:
         async with httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
@@ -42,10 +47,16 @@ async def _fetch_webpage_content(url: str) -> str:
         ) as client:
             response = await client.get(url)
             response.raise_for_status()
-            return markdownify(response.text)
+            markdown = markdownify(response.text)
     except Exception as e:
         logger.warning("webpage_fetch_failed", url=url, error=str(e))
         return f"Error fetching content from {url}: {str(e)}"
+
+    limit = settings.RESEARCH_WEBPAGE_MAX_CHARS
+    if len(markdown) > limit:
+        logger.info("webpage_content_truncated", url=url, original_chars=len(markdown), limit=limit)
+        markdown = markdown[:limit] + "\n\n[... content truncated]"
+    return markdown
 
 
 @tool(parse_docstring=True)
