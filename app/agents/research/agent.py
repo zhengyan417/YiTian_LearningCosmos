@@ -1,14 +1,18 @@
 """Deep research orchestrator graph.
 
 Flow:
-    plan -> dispatch -> synthesize -> END
+    plan -> dispatch ⇄ supervise -> synthesize -> END
 
-- ``plan`` instructs the LLM to output JSON with research sub-tasks and
-  parses the response into a ``ResearchPlan``.
-- ``dispatch`` runs the researcher sub-graph concurrently for each task,
-  capped at ``RESEARCH_MAX_CONCURRENT_SUBAGENTS``.
-- ``synthesize`` consolidates the sub-agent findings into a single markdown
-  report with unified citations.
+- ``plan`` decomposes the user request into initial research sub-tasks.
+- ``dispatch`` runs the researcher sub-graph concurrently for each of the
+  current round's tasks, capped at ``RESEARCH_MAX_CONCURRENT_SUBAGENTS``.
+- ``supervise`` reviews the accumulated findings and either dispatches another
+  round of research (loop back to ``dispatch``) or finishes (``synthesize``).
+- ``synthesize`` consolidates all findings into a single markdown report with
+  unified citations.
+
+Every guard and failure mode in ``supervise`` routes to ``synthesize``, so a
+bad LLM response can only end the loop — it can never extend it.
 """
 
 import asyncio
@@ -46,7 +50,9 @@ from app.agents.base import (
 from app.agents.research.researcher import run_researcher
 from app.agents.research.state import (
     DeepResearchState,
+    ResearchFinding,
     ResearchPlan,
+    SupervisorDecision,
 )
 from app.core.config import (
     Environment,
@@ -57,6 +63,8 @@ from app.core.metrics import llm_inference_duration_seconds
 from app.core.observability import get_langfuse_callback_handler
 from app.services.llm import llm_service
 from app.utils import extract_json
+
+_JSON_MODE: dict = {"response_format": {"type": "json_object"}}
 
 
 def _planner_prompt() -> str:
@@ -74,6 +82,18 @@ def _synthesis_prompt(research_request: str, findings: str) -> str:
         research_request=research_request,
         findings=findings,
     )
+
+
+def _supervise_prompt() -> str:
+    """Load the research supervisor prompt with the current date inlined."""
+    return load_prompt(__file__, "supervise.md").format(current_date_and_time=now_str())
+
+
+def _format_findings(findings: list[ResearchFinding]) -> str:
+    """Render accumulated findings as markdown sections keyed by their task."""
+    if not findings:
+        return "No findings."
+    return "\n\n---\n\n".join(f"### Task: {f.task}\n\n{f.content}" for f in findings)
 
 
 PostgresConnPool = AsyncConnectionPool[AsyncConnection[DictRow]]
@@ -121,6 +141,10 @@ class ResearchAgent:
                 raise e
         return self._connection_pool
 
+    # ------------------------------------------------------------------
+    # Graph nodes
+    # ------------------------------------------------------------------
+
     async def _plan(self, state: DeepResearchState) -> Command:
         """Decompose the user's request into focused research sub-tasks."""
         request_msg = state.messages[-1] if state.messages else None
@@ -155,36 +179,106 @@ class ResearchAgent:
         )
 
     async def _dispatch(self, state: DeepResearchState) -> Command:
-        """Run each planned task in a researcher sub-graph, bounded concurrency."""
-        semaphore = asyncio.Semaphore(settings.RESEARCH_MAX_CONCURRENT_SUBAGENTS)
+        """Run the current round's tasks in researcher sub-graphs, bounded concurrency.
 
-        async def _bounded(task: str) -> str:
+        ``findings`` and ``completed_tasks`` carry ``operator.add`` reducers, so
+        this node returns only the current round's results — they accumulate
+        across supervisor rounds.
+        """
+        semaphore = asyncio.Semaphore(settings.RESEARCH_MAX_CONCURRENT_SUBAGENTS)
+        tasks = list(state.research_tasks)
+
+        async def _bounded(task: str) -> ResearchFinding:
             async with semaphore:
                 try:
-                    return await run_researcher(task)
+                    content = await run_researcher(task)
                 except Exception as e:
                     logger.exception("research_subagent_failed", task=task, error=str(e))
-                    return f"Sub-agent for task '{task}' failed: {str(e)}"
+                    content = f"Sub-agent for task '{task}' failed: {str(e)}"
+            return ResearchFinding(task=task, content=content)
 
-        findings = list(await asyncio.gather(*[_bounded(t) for t in state.research_tasks]))
-        logger.info("research_dispatch_complete", findings_count=len(findings))
+        round_findings = list(await asyncio.gather(*[_bounded(t) for t in tasks]))
+        logger.info("research_dispatch_complete", round_findings=len(round_findings))
 
-        return Command(update={"findings": findings}, goto="synthesize")
+        return Command(
+            update={"findings": round_findings, "completed_tasks": tasks},
+            goto="supervise",
+        )
+
+    async def _supervise(self, state: DeepResearchState) -> Command:
+        """Decide whether the findings are complete or another round is needed.
+
+        Routes to ``synthesize`` (complete) or back to ``dispatch`` (continue).
+        Every guard and every failure mode routes to synthesize.
+        """
+        rounds_done = state.supervisor_rounds
+
+        # Hard guards — these end the loop regardless of what the LLM might say.
+        if rounds_done >= settings.RESEARCH_MAX_SUPERVISOR_ROUNDS:
+            logger.info("research_supervisor_stop_round_cap", rounds=rounds_done)
+            return Command(goto="synthesize")
+        if len(state.completed_tasks) >= settings.RESEARCH_MAX_TOTAL_SUBAGENTS:
+            logger.info("research_supervisor_stop_subagent_cap", completed=len(state.completed_tasks))
+            return Command(goto="synthesize")
+
+        completed = "\n".join(f"- {t}" for t in state.completed_tasks)
+        supervise_input = (
+            f"## Original research request\n\n{state.research_request}\n\n"
+            f"## Follow-up rounds run so far: {rounds_done} "
+            f"(hard cap {settings.RESEARCH_MAX_SUPERVISOR_ROUNDS})\n\n"
+            f"## Research tasks completed so far\n\n{completed}\n\n"
+            f"## Findings so far\n\n{_format_findings(state.findings)}\n\n"
+            "Assess the findings and reply with the required JSON."
+        )
+
+        try:
+            with llm_inference_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL).time():
+                response = await llm_service.call(
+                    [SystemMessage(content=_supervise_prompt()), HumanMessage(content=supervise_input)],
+                    model_name=settings.DEFAULT_LLM_MODEL,
+                    model_kwargs=_JSON_MODE,
+                )
+            decision = self._parse_supervisor_json(str(response.content) if response.content else "")
+        except Exception as e:
+            logger.warning("research_supervisor_failed_stopping", error=str(e))
+            return Command(goto="synthesize")
+
+        note = decision.reasoning or f"supervisor round {rounds_done + 1}: {decision.decision}"
+        # Trim the new batch to both the per-round and the cumulative caps.
+        room = max(settings.RESEARCH_MAX_TOTAL_SUBAGENTS - len(state.completed_tasks), 0)
+        new_tasks = decision.new_tasks[: min(settings.RESEARCH_MAX_SUBTASKS, room)]
+
+        if decision.decision == "continue" and new_tasks:
+            logger.info("research_supervisor_continue", round=rounds_done + 1, new_tasks=len(new_tasks))
+            return Command(
+                update={
+                    "research_tasks": new_tasks,
+                    "supervisor_notes": [note],
+                    "supervisor_rounds": rounds_done + 1,
+                },
+                goto="dispatch",
+            )
+
+        logger.info("research_supervisor_complete", round=rounds_done + 1, parsed_decision=decision.decision)
+        return Command(update={"supervisor_notes": [note]}, goto="synthesize")
 
     async def _synthesize(self, state: DeepResearchState) -> Command:
-        """Consolidate sub-agent findings into a single final report."""
-        joined = "\n\n---\n\n".join(f"### Sub-agent finding {i + 1}\n\n{f}" for i, f in enumerate(state.findings))
-
+        """Consolidate all accumulated sub-agent findings into the final report."""
         prompt = _synthesis_prompt(
             research_request=state.research_request,
-            findings=joined,
+            findings=_format_findings(state.findings),
         )
 
         with llm_inference_duration_seconds.labels(model=settings.DEFAULT_LLM_MODEL).time():
             response = await llm_service.call([SystemMessage(content=prompt)], model_name=settings.DEFAULT_LLM_MODEL)
 
         report = str(response.content) if response.content else ""
-        logger.info("research_report_synthesized", report_chars=len(report))
+        logger.info(
+            "research_report_synthesized",
+            report_chars=len(report),
+            finding_count=len(state.findings),
+            supervisor_rounds=state.supervisor_rounds,
+        )
 
         return Command(
             update={
@@ -194,6 +288,41 @@ class ResearchAgent:
             goto=END,
         )
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _parse_supervisor_json(self, raw: str) -> SupervisorDecision:
+        """Best-effort parse of the supervisor's JSON response.
+
+        Falls back to a ``complete`` decision when parsing fails so a malformed
+        response can only ever end the loop, never extend it.
+        """
+        text = extract_json(raw)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("research_supervisor_json_parse_failed", raw=raw[:200])
+            return SupervisorDecision()
+
+        raw_tasks = data.get("new_tasks", []) or []
+        if isinstance(raw_tasks, list):
+            new_tasks = [str(t).strip() for t in raw_tasks if str(t).strip()]
+        else:
+            new_tasks = []
+        # Drop duplicates within the batch while preserving order.
+        new_tasks = list(dict.fromkeys(new_tasks))
+
+        return SupervisorDecision(
+            decision=str(data.get("decision", "complete") or "complete"),
+            reasoning=str(data.get("reasoning", "") or ""),
+            new_tasks=new_tasks,
+        )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     async def create_graph(self) -> Optional[CompiledStateGraph]:
         """Build the orchestrator graph with PostgreSQL checkpointing."""
         if self._graph is not None:
@@ -202,7 +331,8 @@ class ResearchAgent:
         try:
             builder = StateGraph(DeepResearchState)
             builder.add_node("plan", self._plan, destinations=("dispatch",))
-            builder.add_node("dispatch", self._dispatch, destinations=("synthesize",))
+            builder.add_node("dispatch", self._dispatch, destinations=("supervise",))
+            builder.add_node("supervise", self._supervise, destinations=("dispatch", "synthesize"))
             builder.add_node("synthesize", self._synthesize, destinations=(END,))
             builder.set_entry_point("plan")
             builder.set_finish_point("synthesize")

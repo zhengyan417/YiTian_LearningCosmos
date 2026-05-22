@@ -154,13 +154,23 @@ class Settings:
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
         self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "180"))
 
-        # Research Agent Configuration (LangGraph: plan → dispatch → synthesize)
+        # Research Agent Configuration (LangGraph: plan → dispatch ⇄ supervise → synthesize)
         self.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
         self.RESEARCH_MAX_CONCURRENT_SUBAGENTS = int(os.getenv("RESEARCH_MAX_CONCURRENT_SUBAGENTS", "3"))
         self.RESEARCH_MAX_SUBTASKS = int(os.getenv("RESEARCH_MAX_SUBTASKS", "3"))
         self.RESEARCH_MAX_SEARCHES_PER_SUBAGENT = int(os.getenv("RESEARCH_MAX_SEARCHES_PER_SUBAGENT", "5"))
         self.RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "3"))
         self.RESEARCH_WEBPAGE_FETCH_TIMEOUT = float(os.getenv("RESEARCH_WEBPAGE_FETCH_TIMEOUT", "10.0"))
+
+        # Research iteration knobs. The two-layer ReAct loop is always on; these
+        # only bound how far it can iterate:
+        # - Researcher loop: each sub-agent runs search → reflect, and reflect may
+        #   queue follow-up searches until a hard limit is reached.
+        # - Supervisor loop: the orchestrator may dispatch additional research
+        #   rounds after seeing the findings of the previous round.
+        self.RESEARCH_MAX_REFLECTION_ROUNDS = int(os.getenv("RESEARCH_MAX_REFLECTION_ROUNDS", "3"))
+        self.RESEARCH_MAX_SUPERVISOR_ROUNDS = int(os.getenv("RESEARCH_MAX_SUPERVISOR_ROUNDS", "2"))
+        self.RESEARCH_MAX_TOTAL_SUBAGENTS = int(os.getenv("RESEARCH_MAX_TOTAL_SUBAGENTS", "6"))
 
         # Coder Agent Configuration (LangGraph: code → review → END)
         # When CODER_REFLECTION_ENABLED is true the coder runs a single critic

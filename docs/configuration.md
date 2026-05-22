@@ -58,6 +58,9 @@ cp .env.example .env.development
 | `RESEARCH_MAX_SEARCHES_PER_SUBAGENT` | `5` | 每个子智能体最大搜索次数 |
 | `RESEARCH_TAVILY_MAX_RESULTS` | `3` | Tavily 单次搜索最大返回条数 |
 | `RESEARCH_WEBPAGE_FETCH_TIMEOUT` | `10.0` | 抓取网页内容的超时秒数 |
+| `RESEARCH_MAX_REFLECTION_ROUNDS` | `3` | 子研究员 search→reflect 循环最大轮数 |
+| `RESEARCH_MAX_SUPERVISOR_ROUNDS` | `2` | 首轮派发后最多再补的研究轮数 |
+| `RESEARCH_MAX_TOTAL_SUBAGENTS` | `6` | 单次研究累计子研究员运行数硬上限 |
 
 ---
 
