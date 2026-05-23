@@ -22,6 +22,10 @@ from a2a.utils import new_task
 
 from app.agents.base import AgentRunner
 from app.core.logging import logger
+from app.core.usage import (
+    UsageAccumulator,
+    token_usage_var,
+)
 
 
 class SpecialistAgentExecutor(AgentExecutor):
@@ -67,20 +71,40 @@ class SpecialistAgentExecutor(AgentExecutor):
             task_id=task.id,
             context_id=task.context_id,
         )
+
+        # Fresh per-request token accumulator. This A2A request runs in its own
+        # context, so it captures only this specialist's LLM calls; the snapshot
+        # is shipped back to the coordinator as artifact / message metadata.
+        accumulator = UsageAccumulator()
+        token_usage_var.set(accumulator)
+
         await updater.start_work()
 
         try:
             result = await self._runner(user_input, task.context_id)
+            usage = accumulator.snapshot()
             await updater.add_artifact(
                 [Part(root=TextPart(text=result))],
                 name=f"{self._name}_result",
+                metadata={"token_usage": usage.model_dump()},
             )
             await updater.complete()
-            logger.info("a2a_executor_complete", agent=self._name, task_id=task.id)
+            logger.info(
+                "a2a_executor_complete",
+                agent=self._name,
+                task_id=task.id,
+                cost_cny=usage.cost_cny,
+                total_tokens=usage.total_tokens,
+            )
         except Exception as e:
             logger.exception("a2a_executor_failed", agent=self._name, task_id=task.id, error=str(e))
+            # Report partial spend incurred before the failure.
+            usage = accumulator.snapshot()
             await updater.failed(
-                updater.new_agent_message([Part(root=TextPart(text=f"{self._name} agent failed: {e}"))])
+                updater.new_agent_message(
+                    [Part(root=TextPart(text=f"{self._name} agent failed: {e}"))],
+                    metadata={"token_usage": usage.model_dump()},
+                )
             )
 
     @override

@@ -33,6 +33,7 @@ from tenacity import (
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.usage import record_llm_usage
 from app.services.llm.registry import LLMRegistry
 
 T = TypeVar("T", bound=BaseModel)
@@ -144,7 +145,7 @@ class LLMService:
                 timeout budget is exceeded.
         """
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self._call_with_fallback(messages, model_name, response_format, model_kwargs),
                 timeout=settings.LLM_TOTAL_TIMEOUT,
             )
@@ -154,6 +155,12 @@ class LLMService:
                 timeout_seconds=settings.LLM_TOTAL_TIMEOUT,
             )
             raise RuntimeError(f"llm call timed out after {settings.LLM_TOTAL_TIMEOUT}s total budget")
+
+        # Single chokepoint for token accounting — every successful LLM call in
+        # the system passes through here. Records into the current request's
+        # accumulator; a no-op when no accumulator is set.
+        record_llm_usage(result)
+        return result
 
     def get_llm(self) -> Any:
         """Return the current tool-bound default LLM instance.

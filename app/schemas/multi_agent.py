@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from app.schemas.base import BaseResponse
+from app.schemas.usage import TokenUsage
 
 # The set of specialist agents the coordinator can delegate to. Each name maps
 # to an A2A server mounted under settings.A2A_MOUNT_PREFIX.
@@ -106,11 +107,17 @@ class AgentResult(BaseModel):
         agent: The specialist that produced this result.
         task: The task the specialist was given.
         output: The specialist's returned text.
+        usage: Token usage and computed CNY cost for this specialist, reported
+            back across the A2A boundary as artifact metadata.
     """
 
     agent: str = Field(..., description="The specialist agent that produced the result")
     task: str = Field(..., description="The task the specialist was given")
     output: str = Field(..., description="The specialist's returned text")
+    usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        description="Token usage and computed CNY cost for this specialist",
+    )
 
 
 class MultiAgentResponse(BaseResponse):
@@ -120,6 +127,10 @@ class MultiAgentResponse(BaseResponse):
         answer: The final synthesized answer for the user.
         routing_reasoning: The coordinator's explanation of how it routed the request.
         delegations: Per-specialist results that fed into the final answer.
+        coordinator_usage: Token usage and cost of the coordinator's own
+            route/reflect/synthesize LLM calls.
+        usage: Grand-total token usage and cost for the whole chat round —
+            ``coordinator_usage`` plus every specialist's usage.
     """
 
     answer: str = Field(..., description="The final synthesized answer for the user")
@@ -127,4 +138,12 @@ class MultiAgentResponse(BaseResponse):
     delegations: list[AgentResult] = Field(
         default_factory=list,
         description="Per-specialist results that fed into the final answer",
+    )
+    coordinator_usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        description="Token usage and cost of the coordinator's own LLM calls",
+    )
+    usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        description="Total token usage and cost for the whole chat round",
     )

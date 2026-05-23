@@ -9,13 +9,19 @@ from app.schemas.multi_agent import (
     MultiAgentResponse,
     RoutingDecision,
 )
+from app.schemas.usage import (
+    ModelUsage,
+    TokenUsage,
+)
 
 __all__ = [
     "AgentResult",
     "BaseResponse",
     "Delegation",
+    "ModelUsage",
     "MultiAgentRequest",
     "MultiAgentResponse",
     "RoutingDecision",
     "Token",
+    "TokenUsage",
 ]

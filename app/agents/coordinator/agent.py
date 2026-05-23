@@ -43,6 +43,11 @@ from app.core.a2a.client import a2a_specialist_client
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
+from app.core.usage import (
+    UsageAccumulator,
+    aggregate_usage,
+    token_usage_var,
+)
 from app.schemas.multi_agent import (
     AgentResult,
     Delegation,
@@ -50,6 +55,7 @@ from app.schemas.multi_agent import (
     ReflectionDecision,
     RoutingDecision,
 )
+from app.schemas.usage import TokenUsage
 from app.services.llm import llm_service
 from app.utils import extract_json
 
@@ -190,8 +196,9 @@ class CoordinatorAgent:
 
         async def _run_one(delegation: Delegation) -> AgentResult:
             async with semaphore:
+                usage = TokenUsage()
                 try:
-                    output = await a2a_specialist_client.call(
+                    output, usage = await a2a_specialist_client.call(
                         delegation.agent,
                         delegation.task,
                         state.context_id,
@@ -203,7 +210,12 @@ class CoordinatorAgent:
                         error=str(e),
                     )
                     output = f"[{delegation.agent} agent unavailable: {e}]"
-                return AgentResult(agent=delegation.agent, task=delegation.task, output=output)
+                return AgentResult(
+                    agent=delegation.agent,
+                    task=delegation.task,
+                    output=output,
+                    usage=usage,
+                )
 
         results = list(await asyncio.gather(*[_run_one(d) for d in state.delegations]))
         logger.info("coordinator_dispatch_complete", result_count=len(results))
@@ -435,16 +447,36 @@ class CoordinatorAgent:
         """Run the coordinator graph and return the full structured response.
 
         Used by the ``/chat`` route which wants the answer + routing reasoning
-        + per-specialist breakdown. The ``run`` variant below returns only the
-        answer text to satisfy the uniform Agent protocol.
+        + per-specialist breakdown + token usage. The ``run`` variant below
+        returns only the answer text to satisfy the uniform Agent protocol.
         """
         logger.info("coordinator_run_start", context_id=context_id, query_chars=len(task))
+
+        # Per-request accumulator for the coordinator's own route/reflect/
+        # synthesize LLM calls. Each specialist's usage arrives separately over
+        # A2A and is summed into the grand total below.
+        accumulator = UsageAccumulator()
+        token_usage_var.set(accumulator)
+
         graph = self.create_graph()
         final_state = await graph.ainvoke({"query": task, "context_id": context_id})
+
+        delegations = _dedupe_results(final_state.get("results", []))
+        coordinator_usage = accumulator.snapshot()
+        total_usage = aggregate_usage([coordinator_usage, *(d.usage for d in delegations)])
+        logger.info(
+            "coordinator_run_complete",
+            context_id=context_id,
+            total_tokens=total_usage.total_tokens,
+            cost_cny=total_usage.cost_cny,
+            llm_calls=total_usage.llm_calls,
+        )
         return MultiAgentResponse(
             answer=str(final_state.get("answer", "")),
             routing_reasoning=str(final_state.get("routing_reasoning", "")),
-            delegations=_dedupe_results(final_state.get("results", [])),
+            delegations=delegations,
+            coordinator_usage=coordinator_usage,
+            usage=total_usage,
         )
 
     async def run(self, task: str, context_id: str) -> str:

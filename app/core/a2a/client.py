@@ -25,6 +25,7 @@ from a2a.utils import (
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.schemas.usage import TokenUsage
 
 
 def agent_base_url(name: str) -> str:
@@ -68,6 +69,31 @@ def _extract_task_text(task: Task) -> str:
     return ""
 
 
+def _extract_task_usage(task: Task) -> TokenUsage:
+    """Pull the specialist's token usage out of a terminal A2A task.
+
+    The specialist executor attaches usage as artifact metadata on success and
+    as final status-message metadata on failure. Returns a zero-usage object
+    when the task carries neither (e.g. an older specialist build).
+
+    Args:
+        task: The terminal A2A task returned by a specialist.
+
+    Returns:
+        The specialist's reported token usage, or an empty ``TokenUsage``.
+    """
+    if task.artifacts:
+        for artifact in task.artifacts:
+            raw = (artifact.metadata or {}).get("token_usage")
+            if raw:
+                return TokenUsage.model_validate(raw)
+    if task.status and task.status.message and task.status.message.metadata:
+        raw = task.status.message.metadata.get("token_usage")
+        if raw:
+            return TokenUsage.model_validate(raw)
+    return TokenUsage()
+
+
 class A2ASpecialistClient:
     """A2A client wrapper that resolves and calls the specialist servers."""
 
@@ -88,8 +114,8 @@ class A2ASpecialistClient:
             self._httpx = None
             logger.info("a2a_specialist_client_closed")
 
-    async def call(self, agent_name: str, prompt: str, context_id: str) -> str:
-        """Send a task to a specialist's A2A server and return its final text.
+    async def call(self, agent_name: str, prompt: str, context_id: str) -> tuple[str, TokenUsage]:
+        """Send a task to a specialist's A2A server and return its result.
 
         Args:
             agent_name: The specialist to call (research / search / writer / coder).
@@ -97,7 +123,7 @@ class A2ASpecialistClient:
             context_id: A2A context id correlating this call to the user request.
 
         Returns:
-            The specialist's final result text.
+            A tuple of the specialist's final result text and its token usage.
 
         Raises:
             RuntimeError: When the client has not been initialized.
@@ -120,10 +146,12 @@ class A2ASpecialistClient:
 
         logger.info("a2a_specialist_call_start", agent=agent_name, context_id=context_id)
         result_text = ""
+        usage = TokenUsage()
         async for event in client.send_message(message):
             if isinstance(event, tuple):
                 task, _update = event
                 result_text = _extract_task_text(task)
+                usage = _extract_task_usage(task)
             else:
                 result_text = get_message_text(event)
 
@@ -132,8 +160,10 @@ class A2ASpecialistClient:
             agent=agent_name,
             context_id=context_id,
             result_chars=len(result_text),
+            cost_cny=usage.cost_cny,
+            total_tokens=usage.total_tokens,
         )
-        return result_text or "No response from agent."
+        return (result_text or "No response from agent.", usage)
 
 
 # Module-level singleton — initialized and closed by the FastAPI lifespan.
