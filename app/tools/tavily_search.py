@@ -1,10 +1,14 @@
 """Tavily search tool for the deep research workflow.
 
-Uses Tavily to discover relevant URLs, then fetches each page and converts it
-to markdown so the LLM can read full article content rather than a snippet.
+Uses Tavily to discover relevant URLs and their pre-fetched page content
+(``include_raw_content=True``). Falls back to a local httpx fetch when Tavily
+returns no raw content for a hit, so the LLM gets full article content rather
+than just a snippet whenever possible — and bot-protected pages that 403 our
+local fetch usually still come through via Tavily.
 """
 
 import asyncio
+from typing import Any
 
 import httpx
 from langchain_core.tools import tool
@@ -32,12 +36,26 @@ def _get_client() -> TavilyClient:
     return _tavily_client
 
 
-async def _fetch_webpage_content(url: str) -> str:
-    """Fetch a URL and convert the HTML body to markdown.
+def _apply_char_limit(text: str, url: str) -> str:
+    """Cap page content at ``RESEARCH_WEBPAGE_MAX_CHARS``.
 
-    The markdown is capped at ``RESEARCH_WEBPAGE_MAX_CHARS`` so a few large
-    pages cannot blow past the LLM context window once a sub-agent concatenates
-    all of its accumulated search results.
+    A sub-agent concatenates every search result it accumulates, so without
+    this cap a few large pages can blow past the LLM context window.
+    """
+    limit = settings.RESEARCH_WEBPAGE_MAX_CHARS
+    if len(text) > limit:
+        logger.info("webpage_content_truncated", url=url, original_chars=len(text), limit=limit)
+        return text[:limit] + "\n\n[... content truncated]"
+    return text
+
+
+async def _fetch_webpage_content(url: str) -> str:
+    """Fetch a URL via httpx and convert the HTML body to markdown.
+
+    Used as a fallback when Tavily did not return ``raw_content`` for a hit.
+    Many bot-protected sites (Cloudflare etc.) return 403 here — failures are
+    swallowed into an error string so the agent can still produce an answer
+    from whatever other results it has.
     """
     try:
         async with httpx.AsyncClient(
@@ -52,11 +70,24 @@ async def _fetch_webpage_content(url: str) -> str:
         logger.warning("webpage_fetch_failed", url=url, error=str(e))
         return f"Error fetching content from {url}: {str(e)}"
 
-    limit = settings.RESEARCH_WEBPAGE_MAX_CHARS
-    if len(markdown) > limit:
-        logger.info("webpage_content_truncated", url=url, original_chars=len(markdown), limit=limit)
-        markdown = markdown[:limit] + "\n\n[... content truncated]"
-    return markdown
+    return _apply_char_limit(markdown, url)
+
+
+async def _resolve_content(result: dict[str, Any]) -> str:
+    """Prefer Tavily's pre-fetched ``raw_content``; fall back to a local httpx fetch.
+
+    Tavily scrapes server-side with its own proxies and TLS fingerprints, so it
+    bypasses most of the anti-bot 403s that block our own httpx requests. When
+    Tavily returns no raw content for a hit (field missing or empty) we still
+    try the local fetch as a best-effort second chance.
+    """
+    url = result["url"]
+    raw = result.get("raw_content")
+    if isinstance(raw, str) and raw.strip():
+        logger.debug("webpage_content_from_tavily", url=url, chars=len(raw))
+        return _apply_char_limit(raw, url)
+    logger.debug("webpage_content_local_fallback", url=url)
+    return await _fetch_webpage_content(url)
 
 
 @tool(parse_docstring=True)
@@ -79,6 +110,7 @@ async def tavily_search(query: str) -> str:
             query,
             max_results=settings.RESEARCH_TAVILY_MAX_RESULTS,
             topic="general",
+            include_raw_content=True,
         )
     except Exception as e:
         logger.exception("tavily_search_failed", query=query, error=str(e))
@@ -88,7 +120,7 @@ async def tavily_search(query: str) -> str:
     if not results:
         return f"No results found for '{query}'."
 
-    contents = await asyncio.gather(*[_fetch_webpage_content(r["url"]) for r in results])
+    contents = await asyncio.gather(*[_resolve_content(r) for r in results])
 
     formatted = []
     for result, content in zip(results, contents, strict=True):
